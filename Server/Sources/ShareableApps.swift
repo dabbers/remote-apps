@@ -19,6 +19,8 @@ enum ShareableApps {
         }
         let apps = content.applications
             .filter { $0.processID != myPid && (windowCount[$0.processID] ?? 0) > 0 }
+            // System dialogs (e.g. the Accessibility permission alert) are not streamable apps.
+            .filter { !$0.bundleIdentifier.hasPrefix("com.apple.accessibility.") }
             .map { app in
                 AppInfo(pid: app.processID,
                         bundleIdentifier: app.bundleIdentifier,
