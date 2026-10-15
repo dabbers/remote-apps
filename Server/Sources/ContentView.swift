@@ -1,0 +1,87 @@
+import SwiftUI
+import RemoteAppProtocol
+
+struct ContentView: View {
+    @EnvironmentObject var model: ServerModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pairing code").font(.caption).foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(model.pairingCode).font(.system(size: 44, weight: .semibold, design: .monospaced))
+                    Button("New code") { model.regenerateCode() }
+                }
+            }
+
+            GroupBox("Permissions") {
+                VStack(alignment: .leading, spacing: 6) {
+                    permissionRow("Screen Recording", granted: model.screenRecordingGranted)
+                    permissionRow("Accessibility", granted: model.accessibilityGranted)
+                    HStack {
+                        Button("Request…") { model.requestPermissions() }
+                        Button("Re-check") { model.refreshPermissions() }
+                        Spacer()
+                        Text("Grant both in System Settings › Privacy & Security, then relaunch.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            GroupBox("Network") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Advertising as “\(model.serverName)”")
+                        Spacer()
+                        Picker("Transport", selection: $model.transport) {
+                            Text("QUIC").tag(Transport.Kind.quic)
+                            Text("TLS/TCP").tag(Transport.Kind.tcpTLS)
+                        }
+                        .frame(width: 160)
+                        .onChange(of: model.transport) { _, _ in model.start() }
+                    }
+                    Text("Listener: \(model.listenerState)\(model.port.map { " on port \($0)" } ?? "")")
+                        .font(.callout)
+                    if let client = model.clientState {
+                        Text("Client: \(client)").font(.callout)
+                    } else {
+                        Text("No client connected").font(.callout).foregroundStyle(.secondary)
+                    }
+                    if let stats = model.stats {
+                        Text(String(format: "%.0f fps · %.0f kbit/s · %d dropped", stats.fps, stats.kbps, stats.droppedFrames))
+                            .font(.callout.monospacedDigit())
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            GroupBox("Log") {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(model.log.enumerated()), id: \.offset) { i, line in
+                                Text(line).font(.system(.caption, design: .monospaced)).id(i)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .onChange(of: model.log.count) { _, count in
+                        proxy.scrollTo(count - 1, anchor: .bottom)
+                    }
+                }
+                .frame(minHeight: 160)
+            }
+        }
+        .padding()
+        .textSelection(.enabled)
+    }
+
+    private func permissionRow(_ name: String, granted: Bool) -> some View {
+        HStack {
+            Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(granted ? .green : .red)
+            Text(name)
+        }
+    }
+}
