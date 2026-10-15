@@ -10,6 +10,7 @@ struct StreamView: UIViewRepresentable {
     func makeUIView(context: Context) -> StreamUIView {
         let view = StreamUIView(renderer: model.renderer)
         view.onInput = { [weak model] event in model?.send(event) }
+        view.onToggleHUD = { [weak model] in model?.hudVisible.toggle() }
         return view
     }
 
@@ -24,6 +25,8 @@ struct StreamView: UIViewRepresentable {
 
 final class StreamUIView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate, UIKeyInput {
     var onInput: ((InputEvent) -> Void)?
+    /// Called on a two-finger tap: shows or hides the on-screen controls.
+    var onToggleHUD: (() -> Void)?
 
     private let renderer: VideoRenderer
     private let scrollView = UIScrollView()
@@ -61,6 +64,13 @@ final class StreamUIView: UIView, UIScrollViewDelegate, UIGestureRecognizerDeleg
             contentView.addGestureRecognizer(g)
         }
 
+        // Two-finger tap reveals/hides the controls, without stealing single-finger
+        // taps (forwarded as clicks). A two-finger drag still pans the zoomed view.
+        let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap))
+        twoFingerTap.numberOfTouchesRequired = 2
+        twoFingerTap.delegate = self
+        addGestureRecognizer(twoFingerTap)
+
         renderer.onVideoSizeChange = { [weak self] _ in self?.setNeedsLayout() }
     }
 
@@ -95,6 +105,10 @@ final class StreamUIView: UIView, UIScrollViewDelegate, UIGestureRecognizerDeleg
     }
 
     // MARK: Gestures
+
+    @objc private func handleTwoFingerTap() {
+        onToggleHUD?()
+    }
 
     @objc private func handleTap(_ g: UITapGestureRecognizer) {
         guard let p = normalized(g.location(in: contentView)) else { return }

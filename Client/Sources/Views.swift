@@ -28,6 +28,8 @@ struct RootView: View {
 
 struct DiscoveryView: View {
     @EnvironmentObject var model: ClientModel
+    @AppStorage("lastHost") private var host = ""
+    @FocusState private var hostFocused: Bool
 
     var body: some View {
         List {
@@ -39,7 +41,23 @@ struct DiscoveryView: View {
             } footer: {
                 Text("Must match the transport selected in the Mac server.")
             }
-            Section("Macs on this network") {
+            Section {
+                HStack {
+                    TextField("my-mac.tailnet.ts.net or 100.x.y.z", text: $host)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.asciiCapable)
+                        .focused($hostFocused)
+                        .onSubmit { connectManual() }
+                    Button("Connect") { connectManual() }
+                        .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } header: {
+                Text("Connect over Tailscale")
+            } footer: {
+                Text("Enter the MagicDNS name or tailnet IP shown in RemoteApp Server. The server is reachable only over your tailnet.")
+            }
+            Section("Macs on this network (Bonjour, optional)") {
                 if model.servers.isEmpty {
                     HStack {
                         ProgressView()
@@ -59,6 +77,11 @@ struct DiscoveryView: View {
             }
         }
         .navigationTitle("RemoteApp")
+    }
+
+    private func connectManual() {
+        hostFocused = false
+        model.chooseManual(host: host)
     }
 }
 
@@ -129,12 +152,13 @@ struct AppListView: View {
 
 struct StreamingScreen: View {
     @EnvironmentObject var model: ClientModel
-    @State private var hudVisible = true
 
     var body: some View {
         ZStack(alignment: .top) {
-            StreamView().ignoresSafeArea()
-            if hudVisible {
+            // Ignore the notch/home-indicator but NOT the keyboard, so the video
+            // area shrinks to sit above the keyboard when it is up.
+            StreamView().ignoresSafeArea(.container, edges: .all)
+            if model.hudVisible {
                 HStack(spacing: 12) {
                     Button { model.backToApps() } label: { Image(systemName: "chevron.left") }
                     Button { model.keyboardVisible.toggle() } label: {
@@ -147,7 +171,7 @@ struct StreamingScreen: View {
                             Text("\(Int(g.width))×\(Int(g.height)) pt").font(.caption2).foregroundStyle(.secondary)
                         }
                     }
-                    Button { withAnimation { hudVisible = false } } label: { Image(systemName: "eye.slash") }
+                    Button { model.hudVisible = false } label: { Image(systemName: "eye.slash") }
                 }
                 .font(.footnote)
                 .padding(.horizontal, 12)
@@ -155,12 +179,17 @@ struct StreamingScreen: View {
                 .background(.black.opacity(0.55), in: Capsule())
                 .padding(.top, 8)
                 .padding(.horizontal, 12)
-            } else {
-                Color.clear.frame(width: 60, height: 44)
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { withAnimation { hudVisible = true } }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            if !model.hudVisible {
+                // Hint persists so the controls are never unreachable.
+                Text("Two-finger tap for controls")
+                    .font(.caption2).foregroundStyle(.white.opacity(0.5))
+                    .padding(.top, 10)
+                    .allowsHitTesting(false)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: model.hudVisible)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
     }

@@ -20,6 +20,7 @@
 		670AF71256A39B03C7B54D5D /* RemoteAppProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 23D8DE8882C798B9BE8E344A /* RemoteAppProtocol */; };
 		91F1ECD8C8C9241E16795CA9 /* InputInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */; };
 		B0D7129E394D44360EF0B261 /* server.p12 in Resources */ = {isa = PBXBuildFile; fileRef = 04C0FE307956BA4D39A3D7AC /* server.p12 */; };
+		BB5ADF4616DF85D1A646CD81 /* TailscaleInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */; };
 		C88187C57C6208EE9DCC7F5C /* WindowCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E6E8C4E48222FDC6CA707C5 /* WindowCapture.swift */; };
 		CF8A6B9E9E49B47D0BAE6F98 /* RemoteAppClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 231C7B8E91B769B8EA888D16 /* RemoteAppClientApp.swift */; };
 		F3144C04A412003E79AD75C6 /* ServerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3508150C28D206C7B9CDFDEB /* ServerModel.swift */; };
@@ -41,6 +42,7 @@
 		7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputInjector.swift; sourceTree = "<group>"; };
 		83AEF0BAE7048C52AFBC2D8C /* ShareableApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareableApps.swift; sourceTree = "<group>"; };
 		A7E18DD6AA348A244BA4779B /* RemoteAppClient.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RemoteAppClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailscaleInfo.swift; sourceTree = "<group>"; };
 		AE167BA201EC33D48EFFFAC1 /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
 		C43B9CD7A6BA48A50CE03DD3 /* RemoteAppServer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RemoteAppServer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E2664C6C345B0B78205068A5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -139,6 +141,7 @@
 				ECA57E4AC9F89F6BD35826EA /* RemoteAppServerApp.swift */,
 				3508150C28D206C7B9CDFDEB /* ServerModel.swift */,
 				83AEF0BAE7048C52AFBC2D8C /* ShareableApps.swift */,
+				ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */,
 				3E6E8C4E48222FDC6CA707C5 /* WindowCapture.swift */,
 				FFF786761B415FD819DDC4BC /* WindowControl.swift */,
 			);
@@ -261,6 +264,7 @@
 				16AA075C8E7B35C7A03ACCFF /* RemoteAppServerApp.swift in Sources */,
 				F3144C04A412003E79AD75C6 /* ServerModel.swift in Sources */,
 				0ED488BAA9FB40E547BA6A95 /* ShareableApps.swift in Sources */,
+				BB5ADF4616DF85D1A646CD81 /* TailscaleInfo.swift in Sources */,
 				C88187C57C6208EE9DCC7F5C /* WindowCapture.swift in Sources */,
 				01584C8CC552C8AC3B8E57D0 /* WindowControl.swift in Sources */,
 			);

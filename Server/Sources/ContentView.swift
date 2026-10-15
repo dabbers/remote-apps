@@ -32,7 +32,7 @@ struct ContentView: View {
             GroupBox("Network") {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("Advertising as “\(model.serverName)”")
+                        Text("On the client, connect to:")
                         Spacer()
                         Picker("Transport", selection: $model.transport) {
                             Text("QUIC").tag(Transport.Kind.quic)
@@ -41,8 +41,23 @@ struct ContentView: View {
                         .frame(width: 160)
                         .onChange(of: model.transport) { _, _ in model.start() }
                     }
-                    Text("Listener: \(model.listenerState)\(model.port.map { " on port \($0)" } ?? "")")
+                    Text("\(model.connectTarget) : \(String(model.port))")
+                        .font(.system(.title3, design: .monospaced)).textSelection(.enabled)
+                    if let ts = model.tailscale {
+                        Label("Tailnet: \(ts.dnsName) (\(ts.ipv4))\(ts.online ? "" : " — offline")",
+                              systemImage: ts.online ? "lock.shield.fill" : "exclamationmark.shield")
+                            .font(.caption).foregroundStyle(ts.online ? .green : .orange)
+                    }
+                    if let warning = model.tailnetWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    Text("Listener: \(model.listenerState)")
                         .font(.callout)
+                    if !model.boundEndpoints.isEmpty {
+                        Text("Bound to: " + model.boundEndpoints.joined(separator: ", "))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if let client = model.clientState {
                         Text("Client: \(client)").font(.callout)
                     } else {

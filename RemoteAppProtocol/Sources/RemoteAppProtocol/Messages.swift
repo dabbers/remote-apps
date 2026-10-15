@@ -9,6 +9,10 @@ public let bonjourServiceType = "_remoteapp._udp"
 /// ALPN token negotiated during the TLS/QUIC handshake.
 public let alpnProtocol = "remoteapp/1"
 
+/// Fixed port the server binds on its tailnet and loopback interfaces, so a
+/// client can connect by MagicDNS name without discovering the port first.
+public let defaultPort: UInt16 = 53123
+
 // MARK: - Control messages (JSON, kind = .control)
 
 public struct Hello: Codable, Sendable, Equatable {

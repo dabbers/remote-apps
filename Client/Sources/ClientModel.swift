@@ -15,7 +15,7 @@ final class ClientModel: ObservableObject {
 
     @Published var phase: Phase = .browsing
     @Published var servers: [Discovery.Server] = []
-    @Published var transport: Transport.Kind = .quic { didSet { discovery.start(kind: transport) } }
+    @Published var transport: Transport.Kind = .tcpTLS { didSet { discovery.start(kind: transport) } }
     @Published var apps: [AppInfo] = []
     @Published var serverName = ""
     @Published var geometry: WindowGeometry?
@@ -23,6 +23,7 @@ final class ClientModel: ObservableObject {
     @Published var fps: Double = 0
     @Published var errorMessage: String?
     @Published var keyboardVisible = false
+    @Published var hudVisible = true
 
     let renderer = VideoRenderer()
     /// Full-screen drawable size in points. Read lazily: at app init the
@@ -31,6 +32,8 @@ final class ClientModel: ObservableObject {
         let uiScreen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen ?? UIScreen.main
         return ScreenSize(width: uiScreen.bounds.width, height: uiScreen.bounds.height, scale: uiScreen.scale)
     }
+    /// Height currently covered by the keyboard, in points.
+    private var keyboardOverlap: CGFloat = 0
 
     private let discovery = Discovery()
     private var connection: MessageConnection?
@@ -44,6 +47,39 @@ final class ClientModel: ObservableObject {
     init() {
         discovery.onUpdate = { [weak self] servers in self?.servers = servers }
         discovery.start(kind: transport)
+        observeKeyboard()
+    }
+
+    // MARK: Keyboard-aware sizing
+
+    /// When the keyboard shows, the usable area shrinks. Report the reduced size
+    /// so the server resizes the host window to fit above the keyboard, keeping
+    /// the content at full scale instead of hidden behind the keyboard.
+    private func observeKeyboard() {
+        let center = NotificationCenter.default
+        center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
+            guard let self, let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let screenHeight = self.screen.height
+            // Off-screen (hidden) keyboards report an origin at or below the screen.
+            self.keyboardOverlap = frame.origin.y >= screenHeight ? 0 : max(0, screenHeight - frame.origin.y)
+            self.reportVisibleSize()
+        }
+        center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.keyboardOverlap = 0
+            self?.reportVisibleSize()
+        }
+    }
+
+    private var lastReportedHeight: CGFloat = 0
+    private func reportVisibleSize() {
+        guard case .streaming = phase else { return }
+        let full = screen
+        let visibleHeight = max(200, full.height - keyboardOverlap)
+        // Resizing the host window rebuilds the encoder, so ignore the small
+        // intermediate frames the keyboard animation emits.
+        guard abs(visibleHeight - lastReportedHeight) > 20 else { return }
+        lastReportedHeight = visibleHeight
+        connection?.send(.screenSize(ScreenSize(width: full.width, height: visibleHeight, scale: full.scale)))
     }
 
     // MARK: Connection lifecycle
@@ -51,6 +87,26 @@ final class ClientModel: ObservableObject {
     func choose(_ server: Discovery.Server) {
         pendingServer = server
         phase = .pairing(server.name, error: nil)
+    }
+
+    /// Connect by MagicDNS name (e.g. my-mac.tailnet.ts.net) or tailnet IP. This
+    /// is the Tailscale path: the address resolves and routes only over the
+    /// tailnet, so nothing is exposed to the open internet.
+    func chooseManual(host: String) {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Accept an optional ":port" suffix (e.g. 127.0.0.1:53124 for the
+        // server's loopback listener); default to the published port otherwise.
+        var hostPart = trimmed
+        var portValue = defaultPort
+        if let colon = trimmed.lastIndex(of: ":"),
+           let p = UInt16(trimmed[trimmed.index(after: colon)...]),
+           !trimmed[trimmed.startIndex..<colon].contains(":") {
+            hostPart = String(trimmed[trimmed.startIndex..<colon])
+            portValue = p
+        }
+        let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(hostPart), port: NWEndpoint.Port(rawValue: portValue)!)
+        choose(Discovery.Server(name: trimmed, endpoint: endpoint))
     }
 
     func pair(code: String) {
