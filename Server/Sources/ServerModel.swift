@@ -18,6 +18,16 @@ final class ServerModel: ObservableObject {
     @Published var tailnetWarning: String?
 
     let serverName = Host.current().localizedName ?? "Mac"
+    let pairingStore = PairingStore()
+    @Published var pairedCount = 0
+
+    func forgetPairedDevices() {
+        pairingStore.forgetAll()
+        pairedCount = 0
+        append("forgot all paired devices; they must enter the code again")
+    }
+
+    func refreshPairedCount() { pairedCount = pairingStore.pairedCount }
     let port = defaultPort
     /// The address a client should connect to: MagicDNS name when on the tailnet.
     var connectTarget: String { tailscale?.dnsName ?? "127.0.0.1" }
@@ -47,6 +57,7 @@ final class ServerModel: ObservableObject {
 
     func start() {
         stop()
+        refreshPairedCount()
         tailscale = TailscaleInfo.current()
         if let ts = tailscale, !ts.online {
             tailnetWarning = "Tailscale is installed but this Mac is not online on the tailnet."
@@ -177,6 +188,7 @@ final class ServerModel: ObservableObject {
     private func accept(_ connection: NWConnection) {
         let session = ClientSession(connection: connection,
                                     authenticator: PairingCodeAuthenticator(code: pairingCode),
+                                    pairingStore: pairingStore,
                                     serverName: serverName)
         let id = session.id
         session.onLog = { [weak self] line in Task { @MainActor in self?.append(line) } }
@@ -189,6 +201,7 @@ final class ServerModel: ObservableObject {
         session.onAuthenticated = { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
+                self.refreshPairedCount()
                 for (otherId, other) in self.sessions where otherId != id && other.isAuthenticated { other.close() }
             }
         }

@@ -12,6 +12,15 @@ struct ContentView: View {
                     Text(model.pairingCode).font(.system(size: 44, weight: .semibold, design: .monospaced))
                     Button("New code") { model.regenerateCode() }
                 }
+                HStack {
+                    Text(model.pairedCount == 0 ? "No devices remembered"
+                         : "\(model.pairedCount) device\(model.pairedCount == 1 ? "" : "s") remembered — they skip the code")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if model.pairedCount > 0 {
+                        Button("Forget") { model.forgetPairedDevices() }
+                            .font(.caption)
+                    }
+                }
             }
 
             GroupBox("Permissions") {

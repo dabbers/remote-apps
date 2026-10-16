@@ -83,11 +83,42 @@ final class ClientModel: ObservableObject {
         connection?.send(.screenSize(ScreenSize(width: full.width, height: visibleHeight, scale: full.scale)))
     }
 
+    // MARK: Remembered pairing
+
+    private let defaults = UserDefaults.standard
+
+    /// Stable per-install identifier so a server can remember this device.
+    private var deviceID: String {
+        if let id = defaults.string(forKey: "deviceID") { return id }
+        let id = UUID().uuidString
+        defaults.set(id, forKey: "deviceID")
+        return id
+    }
+
+    private func savedToken(for key: String) -> String? {
+        (defaults.dictionary(forKey: "pairTokens") as? [String: String])?[key]
+    }
+    private func saveToken(_ token: String, for key: String) {
+        var d = (defaults.dictionary(forKey: "pairTokens") as? [String: String]) ?? [:]
+        d[key] = token
+        defaults.set(d, forKey: "pairTokens")
+    }
+    private func clearToken(for key: String) {
+        var d = (defaults.dictionary(forKey: "pairTokens") as? [String: String]) ?? [:]
+        d[key] = nil
+        defaults.set(d, forKey: "pairTokens")
+    }
+
     // MARK: Connection lifecycle
 
     func choose(_ server: Discovery.Server) {
         pendingServer = server
-        phase = .pairing(server.name, error: nil)
+        // A remembered Mac connects straight through, skipping the code screen.
+        if let token = savedToken(for: server.name) {
+            connect(to: server, credential: "", token: token)
+        } else {
+            phase = .pairing(server.name, error: nil)
+        }
     }
 
     /// Connect by MagicDNS name (e.g. my-mac.tailnet.ts.net) or tailnet IP. This
@@ -113,13 +144,13 @@ final class ClientModel: ObservableObject {
     func pair(code: String) {
         guard let server = pendingServer else { return }
         if connection == nil {
-            connect(to: server, then: code)
+            connect(to: server, credential: code, token: nil)
         } else {
-            sendHello(code: code)
+            sendHello(code: code, token: nil)
         }
     }
 
-    private func connect(to server: Discovery.Server, then code: String) {
+    private func connect(to server: Discovery.Server, credential: String, token: String?) {
         phase = .connecting(server.name)
         let nw = NWConnection(to: server.endpoint, using: Transport.clientParameters(kind: transport))
         let conn = MessageConnection(connection: nw)
@@ -129,7 +160,7 @@ final class ClientModel: ObservableObject {
                 guard let self else { return }
                 switch state {
                 case .ready:
-                    self.sendHello(code: code)
+                    self.sendHello(code: credential, token: token)
                 case .failed(let error):
                     self.fail("Connection failed: \(error.localizedDescription)")
                 case .waiting(let error):
@@ -170,8 +201,9 @@ final class ClientModel: ObservableObject {
         }
     }
 
-    private func sendHello(code: String) {
-        connection?.send(.hello(Hello(clientName: UIDevice.current.name, credential: code, screen: screen)))
+    private func sendHello(code: String, token: String?) {
+        connection?.send(.hello(Hello(clientName: UIDevice.current.name, deviceID: deviceID,
+                                      credential: code, token: token, screen: screen)))
     }
 
     func disconnect() {
@@ -232,8 +264,13 @@ final class ClientModel: ObservableObject {
             serverName = ack.serverName
             apps = ack.apps
             phase = .apps
+            // Remember this device for next time so the code is not needed again.
+            if let issued = ack.issuedToken, let key = pendingServer?.name { saveToken(issued, for: key) }
             startKeepalive()
         case .authFailed(let reason):
+            // A rejected token is stale (the Mac forgot this device): drop it and
+            // ask for the code again.
+            if let key = pendingServer?.name { clearToken(for: key) }
             if let server = pendingServer { phase = .pairing(server.name, error: reason) }
         case .appList(let list):
             apps = list

@@ -22,6 +22,7 @@ final class ClientSession {
 
     private let connection: MessageConnection
     private let authenticator: Authenticator
+    private let pairingStore: PairingStore
     private let serverName: String
     private let frameRate = 60
     private let bitrate = 12_000_000
@@ -53,9 +54,10 @@ final class ClientSession {
     private var statDropped = 0
     private var statStart = Date()
 
-    init(connection: NWConnection, authenticator: Authenticator, serverName: String) {
+    init(connection: NWConnection, authenticator: Authenticator, pairingStore: PairingStore, serverName: String) {
         self.connection = MessageConnection(connection: connection)
         self.authenticator = authenticator
+        self.pairingStore = pairingStore
         self.serverName = serverName
     }
 
@@ -107,6 +109,15 @@ final class ClientSession {
                 connection.cancel()
                 return
             }
+            // A remembered device skips the code.
+            if let token = hello.token, pairingStore.isValid(deviceID: hello.deviceID, token: token) {
+                isAuthenticated = true
+                onAuthenticated?()
+                clientScreen = hello.screen
+                log("authenticated by remembered pairing (\(hello.clientName))")
+                Task { await self.sendAppList(asHelloAck: true, issuedToken: nil) }
+                return
+            }
             guard authenticator.verify(credential: hello.credential, clientName: hello.clientName) else {
                 log("auth failed")
                 send(.authFailed(reason: "wrong pairing code"))
@@ -115,8 +126,10 @@ final class ClientSession {
             isAuthenticated = true
             onAuthenticated?()
             clientScreen = hello.screen
-            log("authenticated, screen \(Int(hello.screen.width))×\(Int(hello.screen.height))@\(hello.screen.scale)x")
-            Task { await self.sendAppList(asHelloAck: true) }
+            // First pairing with the code: mint a token so this device is remembered.
+            let issued = pairingStore.issue(deviceID: hello.deviceID, name: hello.clientName)
+            log("paired \(hello.clientName); device will be remembered")
+            Task { await self.sendAppList(asHelloAck: true, issuedToken: issued) }
             return
         }
 
@@ -166,12 +179,12 @@ final class ClientSession {
         }
     }
 
-    private func sendAppList(asHelloAck: Bool) async {
+    private func sendAppList(asHelloAck: Bool, issuedToken: String? = nil) async {
         do {
             let snapshot = try await ShareableApps.fetch()
             if asHelloAck {
                 let hostScale = Double(NSScreen.main?.backingScaleFactor ?? 2)
-                send(.helloAck(HelloAck(serverName: serverName, hostScale: hostScale, apps: snapshot.apps)))
+                send(.helloAck(HelloAck(serverName: serverName, hostScale: hostScale, apps: snapshot.apps, issuedToken: issuedToken)))
             } else {
                 send(.appList(snapshot.apps))
             }

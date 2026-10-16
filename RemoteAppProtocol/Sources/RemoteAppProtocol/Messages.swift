@@ -18,14 +18,22 @@ public let defaultPort: UInt16 = 53123
 public struct Hello: Codable, Sendable, Equatable {
     public var protocolVersion: UInt32
     public var clientName: String
-    /// Pairing code (prototype) or password, depending on the authenticator in use.
+    /// Stable per-install identifier so the server can remember this device.
+    public var deviceID: String
+    /// Pairing code (prototype) or password; empty when authenticating by token.
     public var credential: String
+    /// A remembered pairing token from a previous successful pairing, if any.
+    /// When it is valid the server skips the pairing code.
+    public var token: String?
     public var screen: ScreenSize
 
-    public init(protocolVersion: UInt32 = RemoteAppProtocol.protocolVersion, clientName: String, credential: String, screen: ScreenSize) {
+    public init(protocolVersion: UInt32 = RemoteAppProtocol.protocolVersion, clientName: String,
+                deviceID: String, credential: String, token: String? = nil, screen: ScreenSize) {
         self.protocolVersion = protocolVersion
         self.clientName = clientName
+        self.deviceID = deviceID
         self.credential = credential
+        self.token = token
         self.screen = screen
     }
 }
@@ -35,11 +43,15 @@ public struct HelloAck: Codable, Sendable, Equatable {
     /// Backing scale factor of the host's main display (e.g. 2.0 on Retina).
     public var hostScale: Double
     public var apps: [AppInfo]
+    /// A pairing token the client should save and present next time to skip the
+    /// code. Sent only after a successful code-based pairing.
+    public var issuedToken: String?
 
-    public init(serverName: String, hostScale: Double, apps: [AppInfo]) {
+    public init(serverName: String, hostScale: Double, apps: [AppInfo], issuedToken: String? = nil) {
         self.serverName = serverName
         self.hostScale = hostScale
         self.apps = apps
+        self.issuedToken = issuedToken
     }
 }
 
