@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import CoreGraphics
 import RemoteAppProtocol
@@ -16,14 +17,35 @@ final class InputInjector {
     private let queue = DispatchQueue(label: "remoteapp.input", qos: .userInteractive)
     private var lastClick: (time: Date, point: CGPoint, count: Int64)?
     private var dragging = false
+    private var lastActivate = Date.distantPast
 
     init(pid: pid_t, windowFrame: CGRect) {
         self.pid = pid
         self.windowFrame = windowFrame
     }
 
+    /// Events are posted to the app's PID, but an inactive window absorbs the
+    /// first click (and ignores keystrokes) just to become key. So bring the app
+    /// to the front first whenever it is not already active. Throttled so a burst
+    /// of events does not hammer activation.
+    private func ensureActive() {
+        guard Date().timeIntervalSince(lastActivate) > 0.3 else { return }
+        var activated = false
+        DispatchQueue.main.sync {
+            if let app = NSRunningApplication(processIdentifier: pid), !app.isActive {
+                app.activate()
+                activated = true
+            }
+        }
+        if activated {
+            lastActivate = Date()
+            usleep(90_000)   // give the window server time to make it key
+        }
+    }
+
     func handle(_ event: InputEvent) {
         queue.async { [self] in
+            ensureActive()
             switch event {
             case .tap(let at, let button):
                 click(at: screenPoint(at), button: button)
