@@ -20,3 +20,4 @@ Windows/**/obj/
 Windows/.vs/
 *.user
 *.pfx
+Windows/publish/

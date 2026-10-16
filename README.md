@@ -269,10 +269,11 @@ top-left of the primary work area and resized to the client's size.
 **Smoke test.** The client has an unattended mode used to verify a build against
 a running server; it connects, pairs, selects (or launches) an app, types,
 hovers (on loopback it checks that the local cursor followed), resizes, pulls
-the clipboard, then writes a report and a screenshot:
+the clipboard, opens and closes the Remote menu while a menu update arrives,
+then writes a report and a screenshot:
 
 ```bash
-Windows/RemoteApp.Client/bin/Debug/net10.0-windows/RemoteAppClient.exe --smoke 127.0.0.1:53124 <code|-> Notepad report.txt shot.png 12
+Windows/RemoteApp.Client/bin/Debug/net10.0-windows/RemoteAppClient.exe --smoke 127.0.0.1:53124 <code|-> Notepad report.txt shot.png 16
 ```
 
 The server has `RemoteAppServer.exe --type-test "text"`, which types into its own

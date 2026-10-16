@@ -5,6 +5,7 @@ using RemoteApp.Client.Video;
 using RemoteApp.Protocol;
 using RemoteApp.WindowsCommon;
 using Windows.Win32;
+using Windows.Win32.Foundation;
 
 namespace RemoteApp.Client.Forms;
 
@@ -54,7 +55,15 @@ internal sealed class StreamForm : Form
         _menu = new MenuStrip { Dock = DockStyle.Top, RenderMode = ToolStripRenderMode.System };
         _remoteMenu = BuildRemoteMenu();
         _menu.MenuActivate += (_, _) => _model.RequestMenu();
-        _menu.MenuDeactivate += (_, _) => { if (_menuRebuildPending) RebuildMenu(); };
+        _menu.MenuDeactivate += (_, _) =>
+        {
+            // Raised from inside WinForms' menu-mode bookkeeping, which is still
+            // enumerating every toolstrip at that point; creating or disposing
+            // dropdowns there throws "Collection was modified" (hit by closing the
+            // menu or clicking into the picture after a menu update arrived).
+            // Rebuild once that message has fully unwound.
+            if (_menuRebuildPending && IsHandleCreated) BeginInvoke(RebuildMenu);
+        };
 
         _surface = new StreamSurface(video)
         {
@@ -320,6 +329,21 @@ internal sealed class StreamForm : Form
         return remote;
     }
 
+    /// <summary>
+    /// Smoke test: click the Remote menu title exactly as the mouse would, by
+    /// posting the button messages to the menu strip (ShowDropDown/HideDropDown
+    /// skip the menu-mode bookkeeping that a real click goes through).
+    /// </summary>
+    internal void ClickRemoteMenu()
+    {
+        var bounds = _remoteMenu.Bounds;
+        var x = bounds.Left + bounds.Width / 2;
+        var y = bounds.Top + bounds.Height / 2;
+        var at = new LPARAM((y << 16) | (x & 0xFFFF));
+        PInvoke.PostMessage((HWND)_menu.Handle, PInvoke.WM_LBUTTONDOWN, new WPARAM(1), at);
+        PInvoke.PostMessage((HWND)_menu.Handle, PInvoke.WM_LBUTTONUP, new WPARAM(0), at);
+    }
+
     /// <summary>Reproduce the host app's menu bar (read through Accessibility on a Mac) as native menus.</summary>
     private void RebuildMenu()
     {
@@ -331,6 +355,7 @@ internal sealed class StreamForm : Form
         }
         _menuRebuildPending = false;
         _menu.SuspendLayout();
+        var previous = _menu.Items.Cast<ToolStripItem>().Where(item => !ReferenceEquals(item, _remoteMenu)).ToList();
         _menu.Items.Clear();
         _menu.Items.Add(_remoteMenu);
         var menus = _model.Menu;
@@ -341,6 +366,8 @@ internal sealed class StreamForm : Form
             _menu.Items.Add(BuildMenuItem(node, [i]));
         }
         _menu.ResumeLayout();
+        // The old items' dropdowns stay registered with WinForms until disposed.
+        foreach (var item in previous) item.Dispose();
     }
 
     private ToolStripMenuItem BuildMenuItem(MenuNode node, List<int> path)

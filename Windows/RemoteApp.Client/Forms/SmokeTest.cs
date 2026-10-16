@@ -193,6 +193,23 @@ internal sealed class SmokeTest
                 _model.RequestMenu();
                 DumpFrame?.Invoke(Path.ChangeExtension(_options.ScreenshotPath, ".frame.png"));
                 break;
+            case 7:
+                // Click the Remote menu title (a real mouse click through the menu
+                // strip), then make a menu update arrive while the dropdown is
+                // open: the rebuild must wait for the menu to close.
+                if (form == null) break;
+                Log("menu: clicking the Remote menu open, then requesting the menu tree while it is open");
+                form.ClickRemoteMenu();
+                _model.RequestMenu();
+                break;
+            case 8:
+                // The second click closes it and leaves menu mode; the pending
+                // rebuild must not run inside WinForms' own toolstrip bookkeeping
+                // (that used to crash with "Collection was modified").
+                if (form == null) break;
+                Log("menu: clicking the Remote menu closed");
+                form.ClickRemoteMenu();
+                break;
             default:
                 _steps.Stop();
                 break;
