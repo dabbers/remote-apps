@@ -34,7 +34,13 @@ internal sealed class ClientApp : ApplicationContext
         _model = new ClientModel(settings);
         _video = new VideoPipeline();
         if (smoke != null)
-            _smoke = new SmokeTest(smoke, _model) { StreamFormProvider = () => _streamForm, Exit = ExitThread, DumpFrame = _video.DumpNextFrame };
+            _smoke = new SmokeTest(smoke, _model)
+            {
+                StreamFormProvider = () => _streamForm,
+                Exit = ExitThread,
+                DumpFrame = _video.DumpNextFrame,
+                ExtraStats = () => _video.TimingSummary,
+            };
 
         _model.VideoConfigReceived += config => _video.Configure(config);
         _model.VideoFrameReceived += frame => _video.Enqueue(frame);

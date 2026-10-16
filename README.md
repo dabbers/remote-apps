@@ -209,8 +209,8 @@ Win32 via [CsWin32](https://github.com/microsoft/CsWin32)) contains:
 | `RemoteApp.Protocol` | The wire protocol from `PROTOCOL.md`: framing, the JSON message shapes (matching Swift's Codable envelope), TLS transport, H.264 NAL helpers. Platform-neutral. |
 | `RemoteApp.Protocol.Tests` | xUnit tests: every sample in `PROTOCOL.md` §5 round-trips, framing, NAL conversion. |
 | `RemoteApp.WindowsCommon` | Clipboard bridge (Win32 clipboard ↔ neutral items) and icon helpers shared by client and server. |
-| `RemoteApp.Client` | **Windows client.** Connects to a macOS or Windows server and shows the remote app as a *virtual application*: a normal, resizable Windows window with the remote app's title and icon, the remote menu bar reproduced as native menus, and the host window kept the same size as this one. |
-| `RemoteApp.Server` | **Windows server.** Shares one Windows app with any client: DXGI Desktop Duplication capture cropped to the window (menus, dialogs and tooltips included), Media Foundation H.264 (NVIDIA/Intel/AMD hardware MFTs, software fallback), `SendInput` injection, Win32 menu bar, clipboard, Tailscale-only listeners. |
+| `RemoteApp.Client` | **Windows client.** Connects to a macOS or Windows server and shows the remote app as a *virtual application*: a normal, resizable Windows window with the remote app's title and icon, the remote menu bar reproduced as native menus, and the host window kept the same size as this one. Decodes with DXVA into D3D11 textures and presents them through a D3D11 video processor straight into a swap chain. |
+| `RemoteApp.Server` | **Windows server.** Shares one Windows app with any client: DXGI Desktop Duplication capture cropped to the window (menus, dialogs and tooltips included), GPU color conversion with a D3D11 video processor, Media Foundation H.264 (NVIDIA/Intel/AMD hardware MFTs, software fallback), `SendInput` injection, Win32 menu bar, clipboard, Tailscale-only listeners. |
 
 **Build and run** (needs the .NET 10 SDK; no Visual Studio required):
 
@@ -274,6 +274,30 @@ Windows/RemoteApp.Client/bin/Debug/net10.0-windows/RemoteAppClient.exe --smoke 1
 The server has `RemoteAppServer.exe --type-test "text"`, which types into its own
 window through the same input injector.
 
+**Video pipeline.** Both Windows apps share one Direct3D 11 device with Media
+Foundation through a DXGI device manager, so pixels stay on the GPU:
+
+- *Server:* the captured desktop region is a BGRA texture; a D3D11 video
+  processor converts it to NV12 (BT.709) on the GPU; the NV12 frame is read
+  back (1.5 bytes/px) and fed to the H.264 encoder MFT. Handing the texture
+  itself to the encoder is possible (`REMOTEAPP_ENCODER_GPU_INPUT=1`) but
+  measured several times slower on the NVIDIA MFT, so the readback is the default.
+- *Client:* the H.264 decoder runs with DXVA and outputs D3D11 NV12 textures;
+  a video processor converts, scales and letterboxes them straight into a
+  flip-model swap chain on the window. No system-memory pixels, no Direct2D.
+- Fallbacks: without video support on the adapter, or with
+  `REMOTEAPP_FORCE_CPU_VIDEO=1`, the server converts on the CPU and the client
+  decodes to system memory and draws with Direct2D.
+
+Measured on one PC (RTX 2080 Ti, a 2560×1216 window repainting continuously,
+the desktop composed at 32 Hz by a remote display adapter), per process as a
+share of one core:
+
+| Path | Frame rate | Capture → present | Server CPU | Client CPU |
+|---|---|---|---|---|
+| GPU (default) | 32 fps (display-limited) | ~10 ms | ~5% | ~5% |
+| CPU (`REMOTEAPP_FORCE_CPU_VIDEO=1`) | 32 fps | ~24 ms | ~10% | ~60% |
+
 **Windows limitations (prototype).**
 
 - Capture is the monitor region under the window, so other windows overlapping
@@ -282,11 +306,9 @@ window through the same input injector.
   front. Only the primary graphics adapter's monitors can be captured.
 - Classic Win32 menu bars only; apps that draw their own menus (WinUI, Electron,
   Office) report none — their menus still appear in the video.
-- BGRA→NV12 (server) and NV12→BGRA (client) run on the CPU; a D3D11 video
-  processor is the obvious upgrade for large windows.
-- The mouse pointer is composited from the duplication API's pointer shape, but
-  pointer-only updates are not streamed, so the remote cursor moves with the
-  next content change.
+- The mouse pointer is composited from the duplication API's pointer shape (a
+  small readback of the region under it), but pointer-only updates are not
+  streamed, so the remote cursor moves with the next content change.
 - Typing a string into XAML/WinUI apps is paced (a few ms per character) because
   they read modifier state late; single keystrokes are unaffected. Characters
   the active keyboard layout cannot produce are sent as Unicode key events,
@@ -296,9 +318,8 @@ window through the same input injector.
 
 ## Next steps
 
-Remote access beyond the tailnet (WebRTC), HEVC, GPU color conversion on
-Windows, a `move` input event for hover, drag gestures on iOS, certificate
-pinning and real account auth.
+Remote access beyond the tailnet (WebRTC), HEVC, a `move` input event for
+hover, drag gestures on iOS, certificate pinning and real account auth.
 
 ## License
 

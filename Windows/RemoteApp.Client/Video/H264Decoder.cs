@@ -5,20 +5,34 @@ using System.Runtime.InteropServices;
 using RemoteApp.Protocol;
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using Windows.Win32.Graphics.Direct3D11;
 using Windows.Win32.Media.MediaFoundation;
 using Windows.Win32.System.Com;
 
 namespace RemoteApp.Client.Video;
 
-/// <summary>A decoded NV12 picture, valid only for the duration of the callback.</summary>
+/// <summary>
+/// A decoded NV12 picture, valid only for the duration of the callback. Either
+/// a GPU texture (<see cref="IsGpu"/>: <see cref="Texture"/> slice
+/// <see cref="Slice"/>, with <see cref="Sample"/> the decoder sample that owns
+/// it) or system-memory planes.
+/// </summary>
 internal unsafe struct DecodedFrame
 {
+    public bool IsGpu;
+    public ID3D11Texture2D? Texture;
+    public uint Slice;
+    public IMFSample? Sample;
     public byte* Y;
     public int YStride;
     public byte* UV;
     public int UVStride;
-    public int Width;
-    public int Height;
+    /// <summary>The visible picture inside the coded frame.</summary>
+    public Rectangle Visible;
+    public int CodedWidth;
+    public int CodedHeight;
+    public int Width => Visible.Width;
+    public int Height => Visible.Height;
 }
 
 internal unsafe delegate void DecodedFrameHandler(DecodedFrame frame);
@@ -27,7 +41,8 @@ internal unsafe delegate void DecodedFrameHandler(DecodedFrame frame);
 /// Media Foundation H.264 decoder (the in-box <c>CMSH264DecoderMFT</c>) in
 /// low-latency mode. Wire frames are AVCC; they are converted to Annex-B with
 /// the SPS/PPS from <see cref="VideoConfig"/> prepended to keyframes (PROTOCOL.md §7).
-/// Output is NV12 in system memory, handed to the caller while locked.
+/// With a <see cref="GraphicsDevice"/> the decoder runs on the GPU (DXVA) and
+/// outputs D3D11 NV12 textures; otherwise NV12 in system memory.
 /// </summary>
 internal sealed unsafe class H264Decoder : IDisposable
 {
@@ -49,7 +64,10 @@ internal sealed unsafe class H264Decoder : IDisposable
     private bool _mftProvidesSamples;
     private bool _disposed;
 
-    public H264Decoder()
+    /// <summary>True when the decoder outputs D3D11 textures.</summary>
+    public bool UsesGpuOutput { get; }
+
+    public H264Decoder(GraphicsDevice? gpu = null)
     {
         Mf.EnsureStarted();
         PInvoke.CoCreateInstance(ClsidH264DecoderMft, null, CLSCTX.CLSCTX_INPROC_SERVER, out IMFTransform transform)
@@ -62,6 +80,17 @@ internal sealed unsafe class H264Decoder : IDisposable
         {
             _transform.GetAttributes(out var attributes);
             attributes.SetU32(PInvoke.MF_LOW_LATENCY, 1);
+            if (gpu != null && attributes.TryGetU32(PInvoke.MF_SA_D3D11_AWARE, out var aware) && aware == 1)
+            {
+                var manager = Marshal.GetIUnknownForObject(gpu.Manager);
+                try
+                {
+                    _transform.ProcessMessage(MFT_MESSAGE_TYPE.MFT_MESSAGE_SET_D3D_MANAGER, (nuint)manager);
+                    UsesGpuOutput = true;
+                }
+                catch (COMException) { UsesGpuOutput = false; }
+                finally { Marshal.Release(manager); }
+            }
         }
         catch (COMException) { /* optional */ }
         try
@@ -79,8 +108,8 @@ internal sealed unsafe class H264Decoder : IDisposable
 
     /// <summary>Negotiated output details, for diagnostics.</summary>
     public string Description =>
-        $"coded {_codedWidth}×{_codedHeight}, visible {_visible}, stream flags 0x{_outputInfo.dwFlags:X}, cbSize {_outputInfo.cbSize}, " +
-        $"alignment {_outputInfo.cbAlignment}, mft provides samples {_mftProvidesSamples}";
+        $"{(UsesGpuOutput ? "GPU (DXVA)" : "CPU")} output, coded {_codedWidth}×{_codedHeight}, visible {_visible}, " +
+        $"stream flags 0x{_outputInfo.dwFlags:X}, cbSize {_outputInfo.cbSize}, mft provides samples {_mftProvidesSamples}";
 
     /// <summary>(Re)configures for new parameter sets / size. Decoding resumes at the next keyframe.</summary>
     public void Configure(VideoConfig config)
@@ -291,39 +320,77 @@ internal sealed unsafe class H264Decoder : IDisposable
         sample.GetBufferByIndex(0, out var buffer);
         try
         {
-            byte* scanline0;
-            int pitch;
-            var buffer2D = buffer as IMF2DBuffer;
-            if (buffer2D != null)
+            if (UsesGpuOutput && buffer is IMFDXGIBuffer dxgi)
             {
-                buffer2D.Lock2D(&scanline0, out pitch);
+                DeliverGpu(sample, dxgi, consume);
+                return;
             }
-            else
-            {
-                buffer.Lock(&scanline0, null, null);
-                pitch = (int)_codedWidth;
-            }
-            try
-            {
-                var frame = new DecodedFrame
-                {
-                    Y = scanline0 + _visible.Y * pitch + _visible.X,
-                    YStride = pitch,
-                    UV = scanline0 + pitch * (int)_codedHeight + (_visible.Y / 2) * pitch + (_visible.X & ~1),
-                    UVStride = pitch,
-                    Width = _visible.Width,
-                    Height = _visible.Height,
-                };
-                consume(frame);
-            }
-            finally
-            {
-                if (buffer2D != null) buffer2D.Unlock2D(); else buffer.Unlock();
-            }
+            DeliverCpu(buffer, consume);
         }
         finally
         {
             Mf.Release(buffer);
+        }
+    }
+
+    private void DeliverGpu(IMFSample sample, IMFDXGIBuffer dxgi, DecodedFrameHandler consume)
+    {
+        var iid = typeof(ID3D11Texture2D).GUID;
+        void* raw;
+        dxgi.GetResource(&iid, &raw);
+        var texture = (ID3D11Texture2D)Marshal.GetObjectForIUnknown((IntPtr)raw);
+        Marshal.Release((IntPtr)raw);
+        try
+        {
+            dxgi.GetSubresourceIndex(out var slice);
+            consume(new DecodedFrame
+            {
+                IsGpu = true,
+                Texture = texture,
+                Slice = slice,
+                Sample = sample,
+                Visible = _visible,
+                CodedWidth = (int)_codedWidth,
+                CodedHeight = (int)_codedHeight,
+            });
+        }
+        finally
+        {
+            Mf.Release(texture);
+        }
+    }
+
+    private void DeliverCpu(IMFMediaBuffer buffer, DecodedFrameHandler consume)
+    {
+        byte* scanline0;
+        int pitch;
+        var buffer2D = buffer as IMF2DBuffer;
+        if (buffer2D != null)
+        {
+            buffer2D.Lock2D(&scanline0, out pitch);
+        }
+        else
+        {
+            buffer.Lock(&scanline0, null, null);
+            pitch = (int)_codedWidth;
+        }
+        try
+        {
+            consume(new DecodedFrame
+            {
+                IsGpu = false,
+                Y = scanline0 + _visible.Y * pitch + _visible.X,
+                YStride = pitch,
+                UV = scanline0 + pitch * (int)_codedHeight + (_visible.Y / 2) * pitch + (_visible.X & ~1),
+                UVStride = pitch,
+                Visible = new Rectangle(0, 0, _visible.Width, _visible.Height),
+                CodedWidth = _visible.Width,
+                CodedHeight = _visible.Height,
+            });
+        }
+        finally
+        {
+            if (buffer2D != null) buffer2D.Unlock2D(); else buffer.Unlock();
         }
     }
 

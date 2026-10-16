@@ -1,7 +1,6 @@
 // Copyright (c) 2026 dabbers (https://github.com/dabbers)
 // SPDX-License-Identifier: MIT
 
-using System.Diagnostics;
 using RemoteApp.Protocol;
 using RemoteApp.Server.Capture;
 using RemoteApp.Server.Hosting;
@@ -49,17 +48,13 @@ internal sealed class ClientSession
     private Rectangle _bounds;
     private HMONITOR _monitor;
     private double _scale = 1;
-    private DesktopCapture? _capture;
-    private H264Encoder? _encoder;
+    private FramePipeline? _pipeline;
     private InputInjector? _injector;
     private System.Threading.Timer? _geometryTimer;
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
     private Dictionary<int, ShareableApps.Entry> _lastApps = new();
 
     private int _statFrames;
     private long _statBytes;
-    private int _statDropped;
-    private int _statMismatched;
     private long _statStart = Environment.TickCount64;
 
     public ClientSession(MessageConnection connection, string remoteEndpoint, Func<string> pairingCode,
@@ -276,45 +271,24 @@ internal sealed class ClientSession
         new(r.X, r.Y, Math.Max(2, r.Width & ~1), Math.Max(2, r.Height & ~1));
 
     /// <summary>Caller holds <see cref="_sync"/>.</summary>
-    private unsafe void StartPipeline()
+    private void StartPipeline()
     {
-        var size = EvenSize(_bounds);
-        var encoder = new H264Encoder(size.Width, size.Height, FrameRate, Bitrate);
-        encoder.ConfigChanged += config => Send(new VideoConfigMessage(config));
-        encoder.FrameEncoded += SendVideo;
-        encoder.Error += Emit;
-        _encoder = encoder;
-
-        var capture = new DesktopCapture(_monitor, _bounds);
-        capture.FrameCaptured += OnFrame;
-        capture.Error += line =>
+        var gpu = GraphicsDevice.Shared(Emit) ?? throw new InvalidOperationException("Direct3D 11 is not available on this PC");
+        var pipeline = new FramePipeline(gpu, _monitor, _bounds, FrameRate, Bitrate)
+        {
+            ShouldDrop = () => _connection.QueuedVideoFrames >= MaxInFlight,
+        };
+        pipeline.ConfigChanged += config => Send(new VideoConfigMessage(config));
+        pipeline.FrameEncoded += SendVideo;
+        pipeline.Error += line =>
         {
             Emit(line);
             Send(new ErrorMessage(line));
         };
-        _capture = capture;
+        _pipeline = pipeline;
         _statStart = Environment.TickCount64;
-        capture.Start();
-        Emit($"encoder: {encoder.EncoderName} ({(encoder.IsHardware ? "hardware" : "software")}), {size.Width}×{size.Height} @ {FrameRate} fps");
-    }
-
-    private unsafe void OnFrame(byte* bgra, int stride, int width, int height, ulong captureWallMicros)
-    {
-        var encoder = _encoder;
-        if (encoder == null) return;
-        if (width != encoder.Width || height != encoder.Height)
-        {
-            if (Interlocked.Increment(ref _statMismatched) == 1)
-                Emit($"captured {width}×{height} but encoder is {encoder.Width}×{encoder.Height}; dropping until the pipeline restarts");
-            return;
-        }
-        if (_connection.QueuedVideoFrames >= MaxInFlight)
-        {
-            Interlocked.Increment(ref _statDropped);
-            return;
-        }
-        var pts = _clock.ElapsedTicks * 1_000_000L / Stopwatch.Frequency;
-        encoder.Encode(bgra, stride, width, height, captureWallMicros, pts);
+        pipeline.Start();
+        Emit($"pipeline: {pipeline.Description} @ {FrameRate} fps");
     }
 
     private void SendVideo(VideoFrame frame)
@@ -327,7 +301,7 @@ internal sealed class ClientSession
         var frames = Interlocked.Exchange(ref _statFrames, 0);
         var bytes = Interlocked.Exchange(ref _statBytes, 0);
         _statStart = Environment.TickCount64;
-        StatsChanged?.Invoke(new Stats(frames * 1000.0 / elapsed, bytes * 8.0 / elapsed, _statDropped));
+        StatsChanged?.Invoke(new Stats(frames * 1000.0 / elapsed, bytes * 8.0 / elapsed, _pipeline?.DroppedFrames ?? 0));
     }
 
     /// <summary>Caller holds <see cref="_sync"/>.</summary>
@@ -336,7 +310,7 @@ internal sealed class ClientSession
         var size = EvenSize(_bounds);
         Send(new WindowGeometryMessage(new WindowGeometry(
             Math.Round(_bounds.Width / _scale), Math.Round(_bounds.Height / _scale),
-            size.Width, size.Height, WindowControl.Title(_hwnd))));
+            _pipeline?.Width ?? size.Width, _pipeline?.Height ?? size.Height, WindowControl.Title(_hwnd))));
     }
 
     /// <summary>The client's window changed size: resize the host window to match.</summary>
@@ -374,18 +348,17 @@ internal sealed class ClientSession
             if (_injector != null) _injector.Bounds = bounds;
             if (sizeChanged)
             {
-                // The encoder is fixed-size: rebuild capture and encoder.
-                _capture?.Dispose();
-                _encoder?.Dispose();
-                _capture = null;
-                _encoder = null;
+                // The encoder is fixed-size: rebuild capture, conversion and encoder.
+                if (_pipeline != null) Emit($"pipeline stopped: {_pipeline.TimingSummary}, {_pipeline.DroppedFrames} dropped");
+                _pipeline?.Dispose();
+                _pipeline = null;
                 try { StartPipeline(); }
                 catch (Exception e) { Emit($"restart failed: {e.Message}"); Send(new ErrorMessage($"capture restart failed: {e.Message}")); }
                 Emit($"window resized to {bounds.Width}×{bounds.Height} px");
             }
             else
             {
-                _capture?.SetCrop(bounds);
+                _pipeline?.SetCrop(bounds);
             }
             SendGeometry();
         }
@@ -397,10 +370,12 @@ internal sealed class ClientSession
         {
             _geometryTimer?.Dispose();
             _geometryTimer = null;
-            _capture?.Dispose();
-            _capture = null;
-            _encoder?.Dispose();
-            _encoder = null;
+            if (_pipeline != null)
+            {
+                Emit($"pipeline stopped: {_pipeline.TimingSummary}, {_pipeline.DroppedFrames} dropped");
+                _pipeline.Dispose();
+                _pipeline = null;
+            }
             _injector?.Dispose();
             _injector = null;
             _hwnd = HWND.Null;

@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using RemoteApp.Protocol;
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using Windows.Win32.Graphics.Direct3D11;
 using Windows.Win32.Media.MediaFoundation;
 
 namespace RemoteApp.Server.Capture;
@@ -14,7 +15,8 @@ namespace RemoteApp.Server.Capture;
 /// Media Foundation H.264 encoder tuned for low latency: CBR, no B-frames,
 /// a keyframe every two seconds, low-latency mode. Prefers a hardware MFT
 /// (Intel/NVIDIA/AMD, which are asynchronous and driven by their event queue)
-/// and falls back to the in-box software encoder (synchronous). Input is NV12
+/// and falls back to the in-box software encoder (synchronous). Input is NV12,
+/// either as a D3D11 texture (D3D-aware encoders, no system-memory copy) or
 /// in system memory; output Annex-B is converted to the wire's AVCC and the
 /// SPS/PPS are reported through <see cref="ConfigChanged"/>.
 /// </summary>
@@ -29,12 +31,21 @@ internal sealed unsafe class H264Encoder : IDisposable
     public string EncoderName { get; private set; } = "?";
     public bool IsHardware { get; private set; }
 
+    /// <summary>True when the encoder takes D3D11 NV12 textures directly.</summary>
+    public bool UsesGpuInput { get; private set; }
+
+    private int _busyDrops;
+
+    /// <summary>Frames dropped because the (asynchronous) encoder did not ask for input in time.</summary>
+    public int BusyDrops => _busyDrops;
+
     // MediaEventType values an asynchronous MFT raises (mfobjects.h).
     private const uint TransformNeedInput = 601;
     private const uint TransformHaveOutput = 602;
 
     private readonly int _frameRate;
     private readonly int _bitrate;
+    private readonly GraphicsDevice? _gpu;
     private IMFTransform? _transform;
     private IMFActivate? _activate;
     private uint _inputId;
@@ -51,13 +62,15 @@ internal sealed unsafe class H264Encoder : IDisposable
     private readonly object _lock = new();
     private bool _disposed;
 
-    public H264Encoder(int width, int height, int frameRate, int bitrate)
+    /// <param name="gpu">A device with video support to try D3D11 input with; null for system memory only.</param>
+    public H264Encoder(int width, int height, int frameRate, int bitrate, GraphicsDevice? gpu = null)
     {
         if ((width & 1) != 0 || (height & 1) != 0) throw new ArgumentException("NV12 needs even dimensions");
         Width = width;
         Height = height;
         _frameRate = frameRate;
         _bitrate = bitrate;
+        _gpu = gpu is { HasVideo: true } ? gpu : null;
         Mf.EnsureStarted();
 
         var errors = new List<string>();
@@ -140,6 +153,7 @@ internal sealed unsafe class H264Encoder : IDisposable
         }
 
         _async = false;
+        UsesGpuInput = false;
         try
         {
             transform.GetAttributes(out var attributes);
@@ -149,6 +163,23 @@ internal sealed unsafe class H264Encoder : IDisposable
                 attributes.SetU32(PInvoke.MF_TRANSFORM_ASYNC_UNLOCK, 1);
             }
             attributes.SetU32(PInvoke.MF_LOW_LATENCY, 1);
+
+            // D3D-aware encoders can take NV12 textures directly. Opt-in
+            // (REMOTEAPP_ENCODER_GPU_INPUT=1): on the NVIDIA MFT this measured
+            // 45–90 ms per frame, while system-memory NV12 read back from the
+            // GPU conversion encodes in ~12 ms, so the readback is the default.
+            var gpuInputWanted = Environment.GetEnvironmentVariable("REMOTEAPP_ENCODER_GPU_INPUT") == "1";
+            if (_gpu != null && gpuInputWanted && attributes.TryGetU32(PInvoke.MF_SA_D3D11_AWARE, out var aware) && aware == 1)
+            {
+                var manager = Marshal.GetIUnknownForObject(_gpu.Manager!);
+                try
+                {
+                    transform.ProcessMessage(MFT_MESSAGE_TYPE.MFT_MESSAGE_SET_D3D_MANAGER, (nuint)manager);
+                    UsesGpuInput = true;
+                }
+                catch (COMException) { UsesGpuInput = false; }
+                finally { Marshal.Release(manager); }
+            }
         }
         catch (COMException) { /* attributes are optional */ }
 
@@ -210,35 +241,85 @@ internal sealed unsafe class H264Encoder : IDisposable
 
     // MARK: Encoding
 
-    /// <summary>Encodes one BGRA frame (converted to NV12 here). Drops it if the encoder is busy.</summary>
-    public void Encode(byte* bgra, int stride, int width, int height, ulong captureWallMicros, long ptsMicros)
+    /// <summary>Encodes a BGRA frame in system memory (converted to NV12 on the CPU here).</summary>
+    public void EncodeBgra(byte* bgra, int stride, long ptsMicros, ulong captureWallMicros)
     {
         if (_disposed || _transform == null) return;
-        if (width != Width || height != Height) return;
-
         var ySize = Width * Height;
-        var nv12Size = ySize * 3 / 2;
-        _nv12 ??= new byte[nv12Size];
+        _nv12 ??= new byte[ySize * 3 / 2];
         fixed (byte* nv12 = _nv12)
         {
             Bgra2Nv12.Convert(bgra, stride, Width, Height, nv12, Width, nv12 + ySize, Width);
+            EncodeNv12(nv12, Width, nv12 + ySize, Width, ptsMicros, captureWallMicros);
         }
+    }
 
-        var sample = CreateSample(_nv12, ptsMicros);
+    /// <summary>Encodes an NV12 frame in system memory (planes may be padded).</summary>
+    public void EncodeNv12(byte* y, int yStride, byte* uv, int uvStride, long ptsMicros, ulong captureWallMicros)
+    {
+        if (_disposed || _transform == null) return;
+        var length = (uint)(Width * Height * 3 / 2);
+        PInvoke.MFCreateAlignedMemoryBuffer(length, 15, out var buffer).ThrowOnFailure();
+        byte* data;
+        buffer.Lock(&data, null, null);
+        try
+        {
+            for (var row = 0; row < Height; row++)
+                new ReadOnlySpan<byte>(y + row * yStride, Width).CopyTo(new Span<byte>(data + row * Width, Width));
+            var dstUv = data + Width * Height;
+            for (var row = 0; row < Height / 2; row++)
+                new ReadOnlySpan<byte>(uv + row * uvStride, Width).CopyTo(new Span<byte>(dstUv + row * Width, Width));
+        }
+        finally
+        {
+            buffer.Unlock();
+        }
+        buffer.SetCurrentLength(length);
+        EncodeBuffer(buffer, ptsMicros, captureWallMicros);
+    }
+
+    /// <summary>Encodes an NV12 D3D11 texture (requires <see cref="UsesGpuInput"/>).</summary>
+    public void EncodeTexture(ID3D11Texture2D texture, long ptsMicros, ulong captureWallMicros)
+    {
+        if (_disposed || _transform == null) return;
+        PInvoke.MFCreateDXGISurfaceBuffer(typeof(ID3D11Texture2D).GUID, texture, 0, false, out var buffer).ThrowOnFailure();
+        try { buffer.SetCurrentLength((uint)(Width * Height * 3 / 2)); }
+        catch (COMException) { /* some buffers compute their own length */ }
+        EncodeBuffer(buffer, ptsMicros, captureWallMicros);
+    }
+
+    private void EncodeBuffer(IMFMediaBuffer buffer, long ptsMicros, ulong captureWallMicros)
+    {
+        PInvoke.MFCreateSample(out var sample).ThrowOnFailure();
+        sample.AddBuffer(buffer);
+        sample.SetSampleTime(ptsMicros * 10);
+        sample.SetSampleDuration(10_000_000L / _frameRate);
+        Mf.Release(buffer);
         _wallByPts[ptsMicros * 10] = captureWallMicros;
         try
         {
-            lock (_lock)
+            if (_async)
             {
-                if (_disposed || _transform == null) return;
-                if (_async)
+                // Hardware MFTs accept input only after asking for it. Wait outside
+                // the lock: the event thread needs it to drain output, and the
+                // encoder only asks for more input once output has been taken.
+                if (!_needInput.Wait(100))
                 {
-                    // Hardware MFTs accept input only after asking for it.
-                    if (!_needInput.Wait(100)) return;
+                    _wallByPts.TryRemove(ptsMicros * 10, out _);
+                    Interlocked.Increment(ref _busyDrops);
+                    return;
+                }
+                lock (_lock)
+                {
+                    if (_disposed || _transform == null) return;
                     _transform.ProcessInput(_inputId, sample, 0).ThrowOnFailure();
                 }
-                else
+            }
+            else
+            {
+                lock (_lock)
                 {
+                    if (_disposed || _transform == null) return;
                     var hr = _transform.ProcessInput(_inputId, sample, 0);
                     if (hr == HRESULT.MF_E_NOTACCEPTING)
                     {
@@ -258,23 +339,6 @@ internal sealed unsafe class H264Encoder : IDisposable
         {
             Mf.Release(sample);
         }
-    }
-
-    private IMFSample CreateSample(byte[] nv12, long ptsMicros)
-    {
-        PInvoke.MFCreateAlignedMemoryBuffer((uint)nv12.Length, 15, out var buffer).ThrowOnFailure();
-        byte* data;
-        buffer.Lock(&data, null, null);
-        try { nv12.AsSpan().CopyTo(new Span<byte>(data, nv12.Length)); }
-        finally { buffer.Unlock(); }
-        buffer.SetCurrentLength((uint)nv12.Length);
-
-        PInvoke.MFCreateSample(out var sample).ThrowOnFailure();
-        sample.AddBuffer(buffer);
-        sample.SetSampleTime(ptsMicros * 10);
-        sample.SetSampleDuration(10_000_000L / _frameRate);
-        Mf.Release(buffer);
-        return sample;
     }
 
     private void EventLoop(IMFTransform transform, IMFMediaEventGenerator generator)

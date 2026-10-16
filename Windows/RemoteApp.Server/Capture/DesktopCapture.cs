@@ -4,7 +4,6 @@
 using System.Runtime.InteropServices;
 using Windows.Win32;
 using Windows.Win32.Foundation;
-using Windows.Win32.Graphics.Direct3D;
 using Windows.Win32.Graphics.Direct3D11;
 using Windows.Win32.Graphics.Dxgi;
 using Windows.Win32.Graphics.Dxgi.Common;
@@ -14,27 +13,33 @@ namespace RemoteApp.Server.Capture;
 
 /// <summary>
 /// Captures one monitor with DXGI Desktop Duplication and delivers the region
-/// under the shared window as BGRA frames, with the mouse pointer composited
-/// in. Like the Mac server's display-level capture, anything drawn inside the
-/// window's rectangle — menus, dialogs, tooltips — is included, which a
-/// per-window capture would miss. The region can be moved while running.
+/// under the shared window as a BGRA <b>GPU texture</b>, with the mouse
+/// pointer composited in. Like the Mac server's display-level capture,
+/// anything drawn inside the window's rectangle — menus, dialogs, tooltips —
+/// is included, which a per-window capture would miss. The region can be
+/// moved while running. Frames stay on the GPU; the pipeline decides whether
+/// to convert there or read back.
 /// </summary>
 internal sealed unsafe class DesktopCapture : IDisposable
 {
-    public delegate void FrameHandler(byte* bgra, int stride, int width, int height, ulong captureWallMicros);
+    /// <summary>The frame texture is valid until the handler returns (it is reused for the next frame).</summary>
+    public delegate void FrameHandler(ID3D11Texture2D frame, int width, int height, ulong captureWallMicros);
 
+    private readonly GraphicsDevice _gpu;
     private readonly HMONITOR _monitor;
     private readonly object _lock = new();
     private readonly Thread _thread;
     private readonly ManualResetEventSlim _stop = new(false);
     private Rectangle _crop;              // screen coordinates (physical pixels)
     private Rectangle _desktopBounds;     // the output's desktop coordinates
-    private ID3D11Device? _device;
-    private ID3D11DeviceContext? _context;
     private IDXGIOutputDuplication? _duplication;
-    private ID3D11Texture2D? _staging;
-    private int _stagingWidth;
-    private int _stagingHeight;
+    private ID3D11Texture2D? _frame;
+    private int _frameWidth;
+    private int _frameHeight;
+    private ID3D11Texture2D? _pointerStaging;
+    private int _pointerStagingWidth;
+    private int _pointerStagingHeight;
+    private byte[] _pointerPixels = [];
 
     // Mouse pointer state from the duplication API.
     private byte[]? _pointerShape;
@@ -45,8 +50,9 @@ internal sealed unsafe class DesktopCapture : IDisposable
     public event FrameHandler? FrameCaptured;
     public event Action<string>? Error;
 
-    public DesktopCapture(HMONITOR monitor, Rectangle crop)
+    public DesktopCapture(GraphicsDevice gpu, HMONITOR monitor, Rectangle crop)
     {
+        _gpu = gpu;
         _monitor = monitor;
         _crop = crop;
         _thread = new Thread(Run) { IsBackground = true, Name = "remoteapp-capture", Priority = ThreadPriority.AboveNormal };
@@ -97,22 +103,12 @@ internal sealed unsafe class DesktopCapture : IDisposable
             }
         }
         ReleaseDuplication();
-        ReleaseDevice();
+        ReleaseTextures();
     }
 
     private void CreateDuplication()
     {
-        if (_device == null)
-        {
-            PInvoke.D3D11CreateDevice(null, D3D_DRIVER_TYPE.D3D_DRIVER_TYPE_HARDWARE, HMODULE.Null,
-                D3D11_CREATE_DEVICE_FLAG.D3D11_CREATE_DEVICE_BGRA_SUPPORT, default, PInvoke.D3D11_SDK_VERSION,
-                out var device, out _, out var context).ThrowOnFailure();
-            _device = device;
-            _context = context;
-        }
-
-        // Find the DXGI output for the monitor.
-        var dxgiDevice = (IDXGIDevice)_device;
+        var dxgiDevice = (IDXGIDevice)_gpu.Device;
         dxgiDevice.GetAdapter(out var adapter);
         IDXGIOutput? found = null;
         for (uint i = 0; ; i++)
@@ -132,7 +128,7 @@ internal sealed unsafe class DesktopCapture : IDisposable
         if (found == null) throw new InvalidOperationException("the window's monitor is not on the primary graphics adapter");
 
         var output1 = (IDXGIOutput1)found;
-        output1.DuplicateOutput(_device, out var duplication);
+        output1.DuplicateOutput(_gpu.Device, out var duplication);
         Mf.Release(found);
         _duplication = duplication;
     }
@@ -141,23 +137,22 @@ internal sealed unsafe class DesktopCapture : IDisposable
     {
         if (_duplication != null) { try { _duplication.ReleaseFrame(); } catch (COMException) { } Mf.Release(_duplication); }
         _duplication = null;
-        if (_staging != null) Mf.Release(_staging);
-        _staging = null;
-        _stagingWidth = _stagingHeight = 0;
     }
 
-    private void ReleaseDevice()
+    private void ReleaseTextures()
     {
-        if (_context != null) Mf.Release(_context);
-        if (_device != null) Mf.Release(_device);
-        _context = null;
-        _device = null;
+        if (_frame != null) Mf.Release(_frame);
+        _frame = null;
+        _frameWidth = _frameHeight = 0;
+        if (_pointerStaging != null) Mf.Release(_pointerStaging);
+        _pointerStaging = null;
+        _pointerStagingWidth = _pointerStagingHeight = 0;
     }
 
     /// <summary>Acquires one desktop frame; returns false when nothing changed.</summary>
     private bool CaptureOne()
     {
-        if (_duplication == null || _device == null || _context == null) { Thread.Sleep(100); return false; }
+        if (_duplication == null) { Thread.Sleep(100); return false; }
 
         DXGI_OUTDUPL_FRAME_INFO info;
         var hr = _duplication.AcquireNextFrame(16, &info, out var resource);
@@ -175,6 +170,7 @@ internal sealed unsafe class DesktopCapture : IDisposable
             // Pointer-only updates carry no new desktop image (and right after
             // DuplicateOutput the surface is undefined until the first real frame).
             if (info.LastPresentTime == 0) return false;
+
             Rectangle crop;
             lock (_lock) crop = _crop;
             var local = Rectangle.Intersect(new Rectangle(crop.X - _desktopBounds.X, crop.Y - _desktopBounds.Y, crop.Width, crop.Height),
@@ -183,30 +179,20 @@ internal sealed unsafe class DesktopCapture : IDisposable
             local.Width &= ~1;
             local.Height &= ~1;
 
-            EnsureStaging(local.Width, local.Height);
-            var texture = (ID3D11Texture2D)resource;
+            EnsureFrameTexture(local.Width, local.Height);
+            var desktop = (ID3D11Texture2D)resource;
             var box = new D3D11_BOX
             {
                 left = (uint)local.X, top = (uint)local.Y, front = 0,
                 right = (uint)local.Right, bottom = (uint)local.Bottom, back = 1,
             };
-            _context.CopySubresourceRegion(_staging!, 0, 0, 0, 0, texture, 0, &box);
-            Mf.Release(texture);
+            _gpu.Context.CopySubresourceRegion(_frame!, 0, 0, 0, 0, desktop, 0, &box);
+            Mf.Release(desktop);
 
-            D3D11_MAPPED_SUBRESOURCE mapped;
-            _context.Map(_staging!, 0, D3D11_MAP.D3D11_MAP_READ, 0, &mapped);
-            try
-            {
-                var pixels = (byte*)mapped.pData;
-                if (_pointerVisible && _pointerShape != null)
-                    DrawPointer(pixels, (int)mapped.RowPitch, local);
-                var wall = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
-                FrameCaptured?.Invoke(pixels, (int)mapped.RowPitch, local.Width, local.Height, wall);
-            }
-            finally
-            {
-                _context.Unmap(_staging!, 0);
-            }
+            if (_pointerVisible && _pointerShape != null) CompositePointer(local);
+
+            var wall = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000;
+            FrameCaptured?.Invoke(_frame!, local.Width, local.Height, wall);
             return true;
         }
         finally
@@ -216,29 +202,14 @@ internal sealed unsafe class DesktopCapture : IDisposable
         }
     }
 
-    private void EnsureStaging(int width, int height)
+    private void EnsureFrameTexture(int width, int height)
     {
-        if (_staging != null && _stagingWidth == width && _stagingHeight == height) return;
-        if (_staging != null) Mf.Release(_staging);
-        var desc = new D3D11_TEXTURE2D_DESC
-        {
-            Width = (uint)width,
-            Height = (uint)height,
-            MipLevels = 1,
-            ArraySize = 1,
-            Format = DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc = new DXGI_SAMPLE_DESC { Count = 1, Quality = 0 },
-            Usage = D3D11_USAGE.D3D11_USAGE_STAGING,
-            BindFlags = 0,
-            CPUAccessFlags = D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_READ,
-            MiscFlags = 0,
-        };
-        ID3D11Texture2D_unmanaged* texture;
-        _device!.CreateTexture2D(&desc, null, &texture);
-        _staging = (ID3D11Texture2D)Marshal.GetObjectForIUnknown((IntPtr)texture);
-        Marshal.Release((IntPtr)texture);
-        _stagingWidth = width;
-        _stagingHeight = height;
+        if (_frame != null && _frameWidth == width && _frameHeight == height) return;
+        if (_frame != null) Mf.Release(_frame);
+        _frame = _gpu.CreateTexture(width, height, DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_USAGE.D3D11_USAGE_DEFAULT,
+            D3D11_BIND_FLAG.D3D11_BIND_RENDER_TARGET | D3D11_BIND_FLAG.D3D11_BIND_SHADER_RESOURCE, 0);
+        _frameWidth = width;
+        _frameHeight = height;
     }
 
     private void ReadPointerShape(uint size)
@@ -253,26 +224,79 @@ internal sealed unsafe class DesktopCapture : IDisposable
         _pointerInfo = shape;
     }
 
-    /// <summary>Composites the pointer (color, monochrome or masked color) into the captured region.</summary>
-    private void DrawPointer(byte* pixels, int pitch, Rectangle local)
+    /// <summary>
+    /// Composites the pointer into the frame texture: the (small) rectangle
+    /// under the pointer is read back, blended on the CPU (color, monochrome
+    /// or masked color shapes) and written back with UpdateSubresource.
+    /// </summary>
+    private void CompositePointer(Rectangle local)
+    {
+        var info = _pointerInfo;
+        var type = (DXGI_OUTDUPL_POINTER_SHAPE_TYPE)info.Type;
+        var shapeHeight = type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE.DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME ? (int)info.Height / 2 : (int)info.Height;
+        var pointerRect = new Rectangle(_pointerPosition.X - local.X, _pointerPosition.Y - local.Y, (int)info.Width, shapeHeight);
+        var area = Rectangle.Intersect(pointerRect, new Rectangle(0, 0, local.Width, local.Height));
+        if (area.Width <= 0 || area.Height <= 0) return;
+
+        EnsurePointerStaging(area.Width, area.Height);
+        var box = new D3D11_BOX
+        {
+            left = (uint)area.X, top = (uint)area.Y, front = 0,
+            right = (uint)area.Right, bottom = (uint)area.Bottom, back = 1,
+        };
+        _gpu.Context.CopySubresourceRegion(_pointerStaging!, 0, 0, 0, 0, _frame!, 0, &box);
+
+        var stride = area.Width * 4;
+        if (_pointerPixels.Length < stride * area.Height) _pointerPixels = new byte[stride * area.Height];
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        _gpu.Context.Map(_pointerStaging!, 0, D3D11_MAP.D3D11_MAP_READ, 0, &mapped);
+        try
+        {
+            for (var row = 0; row < area.Height; row++)
+                new ReadOnlySpan<byte>((byte*)mapped.pData + row * mapped.RowPitch, stride).CopyTo(_pointerPixels.AsSpan(row * stride));
+        }
+        finally
+        {
+            _gpu.Context.Unmap(_pointerStaging!, 0);
+        }
+
+        fixed (byte* pixels = _pointerPixels)
+        {
+            DrawPointer(pixels, stride, area, pointerRect.Location);
+            _gpu.Context.UpdateSubresource(_frame!, 0, &box, pixels, (uint)stride, 0);
+        }
+    }
+
+    private void EnsurePointerStaging(int width, int height)
+    {
+        if (_pointerStaging != null && _pointerStagingWidth >= width && _pointerStagingHeight >= height) return;
+        if (_pointerStaging != null) Mf.Release(_pointerStaging);
+        var w = Math.Max(width, 64);
+        var h = Math.Max(height, 64);
+        _pointerStaging = _gpu.CreateTexture(w, h, DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_USAGE.D3D11_USAGE_STAGING,
+            0, D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_READ);
+        _pointerStagingWidth = w;
+        _pointerStagingHeight = h;
+    }
+
+    /// <summary>Blends the pointer shape into <paramref name="pixels"/>, which holds <paramref name="area"/> of the frame.</summary>
+    private void DrawPointer(byte* pixels, int pitch, Rectangle area, Point pointerOrigin)
     {
         var shape = _pointerShape!;
         var info = _pointerInfo;
         var type = (DXGI_OUTDUPL_POINTER_SHAPE_TYPE)info.Type;
         var height = type == DXGI_OUTDUPL_POINTER_SHAPE_TYPE.DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME ? (int)info.Height / 2 : (int)info.Height;
         var width = (int)info.Width;
-        var originX = _pointerPosition.X - local.X;
-        var originY = _pointerPosition.Y - local.Y;
 
         for (var row = 0; row < height; row++)
         {
-            var y = originY + row;
-            if (y < 0 || y >= local.Height) continue;
+            var y = pointerOrigin.Y + row - area.Y;
+            if (y < 0 || y >= area.Height) continue;
             var dst = pixels + y * pitch;
             for (var col = 0; col < width; col++)
             {
-                var x = originX + col;
-                if (x < 0 || x >= local.Width) continue;
+                var x = pointerOrigin.X + col - area.X;
+                if (x < 0 || x >= area.Width) continue;
                 var d = dst + x * 4;
                 switch (type)
                 {

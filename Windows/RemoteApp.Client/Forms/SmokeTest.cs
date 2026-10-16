@@ -30,6 +30,7 @@ internal sealed class SmokeTest
     public Func<StreamForm?>? StreamFormProvider { get; init; }
     public Action? Exit { get; init; }
     public Action<string>? DumpFrame { get; init; }
+    public Func<string>? ExtraStats { get; init; }
 
     public SmokeTest(SmokeOptions options, ClientModel model)
     {
@@ -54,6 +55,14 @@ internal sealed class SmokeTest
 
     public void Begin()
     {
+        // REMOTEAPP_SMOKE_SIZE=2560x1440 opens the virtual window at that size (in points).
+        var size = Environment.GetEnvironmentVariable("REMOTEAPP_SMOKE_SIZE")?.Split('x');
+        if (size is { Length: 2 } && int.TryParse(size[0], out var w) && int.TryParse(size[1], out var h) && w > 100 && h > 100)
+        {
+            _model.Settings.StreamWidth = w;
+            _model.Settings.StreamHeight = h;
+            Log($"initial window size {w}×{h} pt");
+        }
         Log($"connecting to {_options.Host}");
         _model.Connect(_options.Host);
     }
@@ -168,7 +177,8 @@ internal sealed class SmokeTest
         _finished = true;
         _timer.Stop();
         _steps.Stop();
-        Log($"finishing ({reason}): presented {_presentedFrames} frames, {_model.Fps:0.0} fps, {_model.LatencyMs:0.0} ms latency");
+        Log($"finishing ({reason}): presented {_presentedFrames} frames, {_model.Fps:0.0} fps, {_model.LatencyMs:0.0} ms capture→present latency");
+        if (ExtraStats != null) Log("video stats: " + ExtraStats());
         try
         {
             var form = StreamFormProvider?.Invoke();

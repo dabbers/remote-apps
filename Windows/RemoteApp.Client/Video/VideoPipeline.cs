@@ -2,19 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using RemoteApp.Protocol;
 
 namespace RemoteApp.Client.Video;
 
 /// <summary>
-/// Owns the decode thread: wire frames in, decoded pictures converted to BGRA
-/// and presented. Config changes, resets and the window's surface commands
-/// (attach, resize, redraw, detach) travel through the same queue, so ordering
-/// is preserved and — importantly — the Direct2D objects are created and used
-/// on this one thread only (COM interop refuses to share them across
-/// apartments). If the queue backs up, non-keyframes are dropped until the
-/// next keyframe so the picture catches up instead of lagging.
+/// Owns the decode thread: wire frames in, decoded pictures presented. With a
+/// capable adapter the whole path is on the GPU: the decoder outputs D3D11
+/// NV12 textures and a video processor converts, scales and letterboxes them
+/// into a swap chain (<see cref="GpuPresenter"/>). Otherwise pictures are
+/// decoded to system memory, converted on the CPU and drawn with Direct2D
+/// (<see cref="D2DPresenter"/>). Config changes, resets and the window's
+/// surface commands travel through the same queue, so ordering is preserved
+/// and every Direct3D/Direct2D object is used on this one thread only. If the
+/// queue backs up, non-keyframes are dropped until the next keyframe so the
+/// picture catches up instead of lagging.
 /// </summary>
 internal sealed unsafe class VideoPipeline : IDisposable
 {
@@ -23,28 +27,41 @@ internal sealed unsafe class VideoPipeline : IDisposable
     private sealed record DetachCommand(ManualResetEventSlim Done);
     private sealed record ResizeCommand(int Width, int Height);
     private sealed record RedrawCommand;
+    private sealed record QueuedFrame(VideoFrame Frame, long ReceivedTicks);
 
     private const int BacklogThreshold = 12;
 
     private readonly BlockingCollection<object> _queue = new(new ConcurrentQueue<object>());
     private readonly Thread _thread;
+    private GraphicsDevice? _gpu;
+    private bool _gpuTried;
     private H264Decoder? _decoder;
-    private D2DPresenter? _presenter;
+    private GpuPresenter? _gpuPresenter;
+    private D2DPresenter? _d2dPresenter;
     private byte[]? _bgra;
     private int _bgraWidth;
     private int _bgraHeight;
     private bool _skipping;
     private ulong _currentCaptureWallMicros;
+    private long _currentReceivedTicks;
     private int _framesSeen;
     private int _presentedSinceConfig;
     private string? _dumpPath;
     private Rectangle _videoRect;
 
-    /// <summary>Diagnostics: save the next decoded picture as a PNG.</summary>
-    public void DumpNextFrame(string path) => _dumpPath = path;
+    // Timing: wire frame received → picture presented (client-side only).
+    private long _timedFrames;
+    private double _clientLatencySumMs;
+    private double _clientLatencyMaxMs;
+    private double _decodeSumMs;
 
     /// <summary>Where the last frame was drawn in the attached surface, client pixels (for input mapping).</summary>
     public Rectangle VideoRect => _videoRect;
+
+    /// <summary>Receive → present timing, averaged over the pipeline's lifetime.</summary>
+    public string TimingSummary => _timedFrames == 0 ? "no frames presented"
+        : $"{_timedFrames} frames, receive→present avg {_clientLatencySumMs / _timedFrames:0.0} ms (max {_clientLatencyMaxMs:0.0} ms), " +
+          $"decode+present call avg {_decodeSumMs / _timedFrames:0.0} ms";
 
     /// <summary>Raised on the decode thread with the end-to-end latency (capture → present) in ms.</summary>
     public event Action<double>? FramePresented;
@@ -63,7 +80,7 @@ internal sealed unsafe class VideoPipeline : IDisposable
 
     public void Configure(VideoConfig config) => Enqueue(config);
 
-    public void Enqueue(VideoFrame frame) => Enqueue((object)frame);
+    public void Enqueue(VideoFrame frame) => Enqueue(new QueuedFrame(frame, Stopwatch.GetTimestamp()));
 
     /// <summary>Discard queued frames and wait for a keyframe (new stream selected).</summary>
     public void Reset() => Enqueue(new ResetCommand());
@@ -71,7 +88,7 @@ internal sealed unsafe class VideoPipeline : IDisposable
     /// <summary>Draw into this window from now on.</summary>
     public void AttachSurface(IntPtr hwnd, int width, int height) => Enqueue(new AttachCommand(hwnd, width, height));
 
-    /// <summary>Stop drawing into the window; blocks until the Direct2D target is released.</summary>
+    /// <summary>Stop drawing into the window; blocks until the GPU targets are released.</summary>
     public void DetachSurface()
     {
         using var done = new ManualResetEventSlim(false);
@@ -83,10 +100,25 @@ internal sealed unsafe class VideoPipeline : IDisposable
 
     public void RedrawSurface() => Enqueue(new RedrawCommand());
 
+    /// <summary>Diagnostics: save the next decoded picture as a PNG (CPU-decoded pictures only).</summary>
+    public void DumpNextFrame(string path) => _dumpPath = path;
+
     private void Enqueue(object item)
     {
         try { _queue.Add(item); }
         catch (InvalidOperationException) { /* disposed */ }
+    }
+
+    private GraphicsDevice? Gpu()
+    {
+        if (!_gpuTried)
+        {
+            _gpuTried = true;
+            // REMOTEAPP_FORCE_CPU_VIDEO=1 keeps the CPU decode/convert path (diagnostics, comparisons).
+            _gpu = Environment.GetEnvironmentVariable("REMOTEAPP_FORCE_CPU_VIDEO") == "1" ? null : GraphicsDevice.TryCreate(line => Info?.Invoke(line));
+            if (_gpu != null) Info?.Invoke("GPU path: D3D11 video device ready");
+        }
+        return _gpu;
     }
 
     private void Run()
@@ -100,37 +132,37 @@ internal sealed unsafe class VideoPipeline : IDisposable
                     case VideoConfig config:
                         HandleConfig(config);
                         break;
-                    case VideoFrame frame:
-                        HandleFrame(frame);
+                    case QueuedFrame queued:
+                        HandleFrame(queued);
                         break;
                     case ResetCommand:
                         _decoder?.Reset();
                         _skipping = false;
                         break;
                     case AttachCommand attach:
-                        _presenter?.Dispose();
-                        _presenter = null;
-                        try
-                        {
-                            _presenter = new D2DPresenter(attach.Hwnd, attach.Width, attach.Height);
-                        }
-                        catch (COMException e)
-                        {
-                            Error?.Invoke($"Direct2D unavailable: 0x{e.HResult:X8}");
-                        }
+                        Attach(attach);
                         break;
                     case DetachCommand detach:
-                        _presenter?.Dispose();
-                        _presenter = null;
+                        DisposePresenters();
                         _videoRect = Rectangle.Empty;
                         detach.Done.Set();
                         break;
                     case ResizeCommand resize:
-                        _presenter?.Resize(resize.Width, resize.Height);
-                        if (_presenter != null) _videoRect = _presenter.VideoRect;
+                        try
+                        {
+                            _gpuPresenter?.Resize(resize.Width, resize.Height);
+                            _d2dPresenter?.Resize(resize.Width, resize.Height);
+                        }
+                        catch (COMException e) { Error?.Invoke($"resize failed: 0x{e.HResult:X8}"); }
+                        UpdateVideoRect();
                         break;
                     case RedrawCommand:
-                        _presenter?.Redraw();
+                        try
+                        {
+                            _gpuPresenter?.Redraw();
+                            _d2dPresenter?.Redraw();
+                        }
+                        catch (COMException e) { Error?.Invoke($"redraw failed: 0x{e.HResult:X8}"); }
                         break;
                 }
             }
@@ -138,18 +170,64 @@ internal sealed unsafe class VideoPipeline : IDisposable
         catch (ObjectDisposedException) { }
         finally
         {
-            _presenter?.Dispose();
-            _presenter = null;
+            DisposePresenters();
             _decoder?.Dispose();
             _decoder = null;
+            _gpu?.Dispose();
+            _gpu = null;
         }
+    }
+
+    private void Attach(AttachCommand attach)
+    {
+        DisposePresenters();
+        var gpu = Gpu();
+        if (gpu != null)
+        {
+            try
+            {
+                _gpuPresenter = new GpuPresenter(gpu, attach.Hwnd, attach.Width, attach.Height);
+                return;
+            }
+            catch (COMException e)
+            {
+                Info?.Invoke($"GPU presenter unavailable (0x{e.HResult:X8}); using Direct2D and CPU decoding");
+                // The decoder must not output GPU textures without a GPU presenter.
+                _decoder?.Dispose();
+                _decoder = null;
+                _gpu?.Dispose();
+                _gpu = null;
+            }
+        }
+        try
+        {
+            _d2dPresenter = new D2DPresenter(attach.Hwnd, attach.Width, attach.Height);
+        }
+        catch (COMException e)
+        {
+            Error?.Invoke($"Direct2D unavailable: 0x{e.HResult:X8}");
+        }
+    }
+
+    private void DisposePresenters()
+    {
+        _gpuPresenter?.Dispose();
+        _gpuPresenter = null;
+        _d2dPresenter?.Dispose();
+        _d2dPresenter = null;
+    }
+
+    private void UpdateVideoRect()
+    {
+        if (_gpuPresenter != null) _videoRect = _gpuPresenter.VideoRect;
+        else if (_d2dPresenter != null) _videoRect = _d2dPresenter.VideoRect;
     }
 
     private void HandleConfig(VideoConfig config)
     {
         try
         {
-            _decoder ??= new H264Decoder();
+            _decoder ??= new H264Decoder(Gpu());
             _decoder.Configure(config);
             _skipping = false;
             _framesSeen = 0;
@@ -164,8 +242,9 @@ internal sealed unsafe class VideoPipeline : IDisposable
         }
     }
 
-    private void HandleFrame(VideoFrame frame)
+    private void HandleFrame(QueuedFrame queued)
     {
+        var frame = queued.Frame;
         if (_decoder == null || !_decoder.IsConfigured) return;
         if (_framesSeen++ < 3)
         {
@@ -180,9 +259,12 @@ internal sealed unsafe class VideoPipeline : IDisposable
             _skipping = false;
         }
         _currentCaptureWallMicros = frame.CaptureWallMicros;
+        _currentReceivedTicks = queued.ReceivedTicks;
+        var started = Stopwatch.GetTimestamp();
         try
         {
-            _decoder.Decode(frame, Present);
+            if (_decoder.Decode(frame, Present))
+                _decodeSumMs += Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         }
         catch (COMException e)
         {
@@ -193,8 +275,47 @@ internal sealed unsafe class VideoPipeline : IDisposable
 
     private void Present(DecodedFrame frame)
     {
-        var presenter = _presenter;
-        if (presenter == null) return;
+        try
+        {
+            if (_gpuPresenter != null)
+            {
+                if (frame.IsGpu)
+                    _gpuPresenter.Present(frame.Texture!, frame.Slice, frame.Sample!, frame.Visible, frame.CodedWidth, frame.CodedHeight);
+                else
+                    _gpuPresenter.PresentCpu(frame.Y, frame.YStride, frame.UV, frame.UVStride, frame.Width, frame.Height);
+                _videoRect = _gpuPresenter.VideoRect;
+            }
+            else if (_d2dPresenter != null)
+            {
+                if (frame.IsGpu) return;   // no CPU pixels to draw with Direct2D
+                PresentWithD2D(frame);
+                _videoRect = _d2dPresenter.VideoRect;
+            }
+            else
+            {
+                return;
+            }
+        }
+        catch (COMException e)
+        {
+            Error?.Invoke($"present failed: 0x{e.HResult:X8}");
+            return;
+        }
+
+        var nowMicros = (ulong)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000);
+        var latency = _currentCaptureWallMicros == 0 ? 0 : ((double)nowMicros - _currentCaptureWallMicros) / 1000.0;
+        var clientMs = Stopwatch.GetElapsedTime(_currentReceivedTicks).TotalMilliseconds;
+        _timedFrames++;
+        _clientLatencySumMs += clientMs;
+        if (clientMs > _clientLatencyMaxMs) _clientLatencyMaxMs = clientMs;
+        FramePresented?.Invoke(latency);
+        if (_presentedSinceConfig++ < 2)
+            Info?.Invoke($"presented {frame.Width}×{frame.Height} ({(frame.IsGpu ? "GPU texture" : "CPU planes")}) into {_videoRect}, " +
+                         $"receive→present {clientMs:0.0} ms, capture→present {latency:0.0} ms");
+    }
+
+    private void PresentWithD2D(DecodedFrame frame)
+    {
         var stride = frame.Width * 4;
         if (_bgra == null || _bgraWidth != frame.Width || _bgraHeight != frame.Height)
         {
@@ -205,7 +326,7 @@ internal sealed unsafe class VideoPipeline : IDisposable
         fixed (byte* dst = _bgra)
         {
             Nv12Converter.ToBgra(frame.Y, frame.YStride, frame.UV, frame.UVStride, frame.Width, frame.Height, dst, stride);
-            presenter.Present(dst, frame.Width, frame.Height, stride);
+            _d2dPresenter!.Present(dst, frame.Width, frame.Height, stride);
             if (_dumpPath is { } dumpPath)
             {
                 _dumpPath = null;
@@ -218,12 +339,6 @@ internal sealed unsafe class VideoPipeline : IDisposable
                 catch (Exception e) { Info?.Invoke("frame dump failed: " + e.Message); }
             }
         }
-        _videoRect = presenter.VideoRect;
-        if (_presentedSinceConfig++ < 2)
-            Info?.Invoke($"presented {frame.Width}×{frame.Height} (Y stride {frame.YStride}) into {presenter.VideoRect}");
-        var nowMicros = (ulong)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000);
-        var latency = _currentCaptureWallMicros == 0 ? 0 : ((double)nowMicros - _currentCaptureWallMicros) / 1000.0;
-        FramePresented?.Invoke(latency);
     }
 
     public void Dispose()
