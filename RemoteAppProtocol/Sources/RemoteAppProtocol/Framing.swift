@@ -1,3 +1,6 @@
+// Copyright (c) 2026 dabbers (https://github.com/dabbers)
+// SPDX-License-Identifier: MIT
+
 import Foundation
 
 /// Wire framing: every message is `u32 length (big-endian) | u8 kind | payload`,

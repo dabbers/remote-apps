@@ -1,3 +1,6 @@
+// Copyright (c) 2026 dabbers (https://github.com/dabbers)
+// SPDX-License-Identifier: MIT
+
 import SwiftUI
 import PhotosUI
 import RemoteAppProtocol

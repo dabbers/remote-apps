@@ -200,3 +200,7 @@ xcodebuild -project RemoteApp.xcodeproj -scheme RemoteAppClient -configuration D
 Windows host (Windows.Graphics.Capture + Media Foundation + SendInput), remote
 access (WebRTC or Tailscale), HEVC, drag gestures, certificate pinning and real
 account auth.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Copyright (c) 2026 [dabbers](https://github.com/dabbers).
