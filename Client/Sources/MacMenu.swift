@@ -16,7 +16,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         let model = ClientModel.shared
 
         // Controls to manage the remote session, independent of the streamed app.
-        let remote = UIMenu(title: "Remote", children: [
+        let remoteID = UIMenu.Identifier("io.github.dabbers.remoteapps.remote")
+        let remote = UIMenu(title: "Remote", identifier: remoteID, children: [
             UIKeyCommand(title: "Open an App…", action: #selector(remoteOpenApps),
                          input: "o", modifierFlags: [.command, .shift]),
             UIKeyCommand(title: "Back to App List", action: #selector(remoteBackToApps),
@@ -32,14 +33,21 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // Reproduce the streamed app's menu bar, replacing the standard menus.
         guard !model.menu.isEmpty else { return }
-        for standard: UIMenu.Identifier in [.file, .edit, .format, .view, .help] {
+        // Replace the standard editing menus with the streamed app's. Window and
+        // Help are system-managed on macOS and re-added automatically, so we keep
+        // those native and skip the streamed app's equivalents to avoid duplicates.
+        for standard: UIMenu.Identifier in [.file, .edit, .format, .view] {
             builder.remove(menu: standard)
         }
         let menus = model.menu.enumerated().compactMap { index, node -> UIMenu? in
-            node.isSeparator ? nil : Self.menu(for: node, path: [index])
+            guard !node.isSeparator else { return nil }
+            let title = node.title.lowercased()
+            guard title != "window", title != "help" else { return nil }
+            return Self.menu(for: node, path: [index])
         }
+        // Each insert goes immediately after Remote, so reverse to keep order.
         for menu in menus.reversed() {
-            builder.insertSibling(menu, beforeMenu: .window)
+            builder.insertSibling(menu, afterMenu: remoteID)
         }
         #endif
     }
