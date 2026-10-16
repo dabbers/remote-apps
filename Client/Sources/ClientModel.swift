@@ -26,6 +26,8 @@ final class ClientModel: ObservableObject {
     @Published var hudVisible = true
     @Published var menu: [MenuNode] = []
     @Published var launchable: [LaunchableApp] = []
+    /// Name of the app currently being streamed (used for the Mac window title).
+    @Published var streamingAppName = ""
 
     let renderer = VideoRenderer()
     /// Full-screen drawable size in points. Read lazily: at app init the
@@ -34,8 +36,6 @@ final class ClientModel: ObservableObject {
         let uiScreen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen ?? UIScreen.main
         return ScreenSize(width: uiScreen.bounds.width, height: uiScreen.bounds.height, scale: uiScreen.scale)
     }
-    /// Height currently covered by the keyboard, in points.
-    private var keyboardOverlap: CGFloat = 0
 
     private let discovery = Discovery()
     private var connection: MessageConnection?
@@ -49,39 +49,29 @@ final class ClientModel: ObservableObject {
     init() {
         discovery.onUpdate = { [weak self] servers in self?.servers = servers }
         discovery.start(kind: transport)
-        observeKeyboard()
     }
 
-    // MARK: Keyboard-aware sizing
+    // MARK: Responsive sizing
 
-    /// When the keyboard shows, the usable area shrinks. Report the reduced size
-    /// so the server resizes the host window to fit above the keyboard, keeping
-    /// the content at full scale instead of hidden behind the keyboard.
-    private func observeKeyboard() {
-        let center = NotificationCenter.default
-        center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
-            guard let self, let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
-            let screenHeight = self.screen.height
-            // Off-screen (hidden) keyboards report an origin at or below the screen.
-            self.keyboardOverlap = frame.origin.y >= screenHeight ? 0 : max(0, screenHeight - frame.origin.y)
-            self.reportVisibleSize()
+    /// The drawable area changed — device rotation, a resized Mac/iPad window, or
+    /// the keyboard shrinking the view. Report it (in points) so the host window
+    /// resizes to match and the picture fills it. Debounced, since each resize
+    /// rebuilds the host encoder.
+    private var lastReportedSize: CGSize = .zero
+    private var sizeReportWork: DispatchWorkItem?
+    func reportStreamSize(_ size: CGSize) {
+        guard case .streaming = phase, size.width > 50, size.height > 50 else { return }
+        guard abs(size.width - lastReportedSize.width) > 8 || abs(size.height - lastReportedSize.height) > 8 else { return }
+        // Debounce: during a live window drag the size changes continuously, and
+        // each host resize rebuilds the encoder — only act once it settles.
+        sizeReportWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.lastReportedSize = size
+            self.connection?.send(.screenSize(ScreenSize(width: size.width, height: size.height, scale: self.screen.scale)))
         }
-        center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.keyboardOverlap = 0
-            self?.reportVisibleSize()
-        }
-    }
-
-    private var lastReportedHeight: CGFloat = 0
-    private func reportVisibleSize() {
-        guard case .streaming = phase else { return }
-        let full = screen
-        let visibleHeight = max(200, full.height - keyboardOverlap)
-        // Resizing the host window rebuilds the encoder, so ignore the small
-        // intermediate frames the keyboard animation emits.
-        guard abs(visibleHeight - lastReportedHeight) > 20 else { return }
-        lastReportedHeight = visibleHeight
-        connection?.send(.screenSize(ScreenSize(width: full.width, height: visibleHeight, scale: full.scale)))
+        sizeReportWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
     }
 
     // MARK: Remembered pairing
@@ -234,9 +224,11 @@ final class ClientModel: ObservableObject {
 
     func select(_ app: AppInfo) {
         renderer.reset()
+        streamingAppName = app.name
         geometry = nil
         menu = []
         latencyEMA = nil
+        lastReportedSize = .zero
         connection?.send(.selectApp(SelectApp(pid: app.pid)))
         phase = .streaming
     }
@@ -246,9 +238,11 @@ final class ClientModel: ObservableObject {
     /// Launch an installed app (server opens it if needed) and stream it.
     func launchApp(_ app: LaunchableApp) {
         renderer.reset()
+        streamingAppName = app.name
         geometry = nil
         menu = []
         latencyEMA = nil
+        lastReportedSize = .zero
         connection?.send(.launchApp(bundleIdentifier: app.bundleIdentifier))
         phase = .streaming
     }

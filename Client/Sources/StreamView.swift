@@ -11,6 +11,7 @@ struct StreamView: UIViewRepresentable {
         let view = StreamUIView(renderer: model.renderer)
         view.onInput = { [weak model] event in model?.send(event) }
         view.onToggleHUD = { [weak model] in model?.hudVisible.toggle() }
+        view.onSizeChange = { [weak model] size in model?.reportStreamSize(size) }
         return view
     }
 
@@ -20,6 +21,14 @@ struct StreamView: UIViewRepresentable {
         } else if !model.keyboardVisible, view.isFirstResponder {
             view.resignFirstResponder()
         }
+        // On Mac (Catalyst) the window is a real resizable Mac window; title it
+        // with the streamed app so it reads like that app's own window.
+        #if targetEnvironment(macCatalyst)
+        let title = model.geometry?.windowTitle.flatMap { $0.isEmpty ? nil : $0 } ?? model.streamingAppName
+        if let scene = view.window?.windowScene, scene.title != title {
+            scene.title = title
+        }
+        #endif
     }
 }
 
@@ -35,6 +44,9 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
     var onInput: ((InputEvent) -> Void)?
     /// Called on a two-finger tap: shows or hides the on-screen controls.
     var onToggleHUD: (() -> Void)?
+    /// Called when the drawable area changes (rotation, window resize, keyboard).
+    var onSizeChange: ((CGSize) -> Void)?
+    private var lastBoundsSize: CGSize = .zero
 
     private let renderer: VideoRenderer
     private let contentView = UIView()
@@ -90,6 +102,10 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        if bounds.size != lastBoundsSize {
+            lastBoundsSize = bounds.size
+            onSizeChange?(bounds.size)
+        }
         // Content view fills the view at 1x, then the zoom/pan transform is applied.
         contentView.transform = .identity
         contentView.bounds = CGRect(origin: .zero, size: bounds.size)

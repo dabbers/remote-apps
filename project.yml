@@ -42,14 +42,24 @@ targets:
   RemoteAppClient:
     type: application
     platform: iOS
+    deploymentTarget: "17.0"
+    supportedDestinations: [iOS, macCatalyst]
     sources:
       - path: Client/Sources
     dependencies:
       - package: RemoteAppProtocol
+    entitlements:
+      path: Client/RemoteAppClient.entitlements
     settings:
       base:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Client/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: io.github.dabbers.remoteapps.client
-        TARGETED_DEVICE_FAMILY: "1"
+        # iPhone + iPad; Mac Catalyst builds a native-feeling Mac app.
+        TARGETED_DEVICE_FAMILY: "1,2"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        SUPPORTS_MACCATALYST: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        CODE_SIGN_IDENTITY[sdk=macosx*]: "Apple Development"
+        DEVELOPMENT_TEAM[sdk=macosx*]: "YOUR_TEAM_ID"
