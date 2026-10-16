@@ -23,92 +23,117 @@ struct StreamView: UIViewRepresentable {
     }
 }
 
-final class StreamUIView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate, UIKeyInput {
+/// Renders the stream and maps touches to remote input.
+///
+/// Zoom/pan is done with a plain affine transform on the content view rather
+/// than a UIScrollView: an AVSampleBufferDisplayLayer renders black inside a
+/// zooming scroll view, but composes correctly under a view transform. This
+/// matters when the host window cannot shrink to phone size (or to fit above
+/// the keyboard): the picture is letterboxed small and the user pinches in and
+/// two-finger-pans to reach the part they need.
+final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
     var onInput: ((InputEvent) -> Void)?
     /// Called on a two-finger tap: shows or hides the on-screen controls.
     var onToggleHUD: (() -> Void)?
 
     private let renderer: VideoRenderer
-    private let scrollView = UIScrollView()
     private let contentView = UIView()
-    private var lastPanPoint: CGPoint = .zero
+
+    private var zoomScale: CGFloat = 1
+    private var panOffset: CGPoint = .zero
+    private let maxZoom: CGFloat = 6
+    private var pinchStartScale: CGFloat = 1
+    private var pinchStartOffset: CGPoint = .zero
+    private var pinchAnchor: CGPoint = .zero
+    private var panStartOffset: CGPoint = .zero
+    private var lastScrollPoint: CGPoint = .zero
 
     init(renderer: VideoRenderer) {
         self.renderer = renderer
         super.init(frame: .zero)
         backgroundColor = .black
-
-        scrollView.delegate = self
-        scrollView.minimumZoomScale = 1
-        scrollView.maximumZoomScale = 4
-        scrollView.bouncesZoom = true
-        scrollView.showsVerticalScrollIndicator = false
-        scrollView.showsHorizontalScrollIndicator = false
-        scrollView.contentInsetAdjustmentBehavior = .never
-        // Two fingers pan the zoomed view; one finger is forwarded as a remote scroll.
-        scrollView.panGestureRecognizer.minimumNumberOfTouches = 2
-        addSubview(scrollView)
+        clipsToBounds = true
 
         contentView.backgroundColor = .black
         contentView.layer.addSublayer(renderer.layer)
-        scrollView.addSubview(contentView)
+        addSubview(contentView)
 
+        // One finger → remote input.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-        tap.numberOfTapsRequired = 1
+        tap.numberOfTouchesRequired = 1
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
         longPress.minimumPressDuration = 0.45
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
-        pan.maximumNumberOfTouches = 1
-        for g in [tap, longPress, pan] {
-            g.delegate = self
-            contentView.addGestureRecognizer(g)
-        }
+        longPress.numberOfTouchesRequired = 1
+        let scroll = UIPanGestureRecognizer(target: self, action: #selector(handleScroll))
+        scroll.minimumNumberOfTouches = 1
+        scroll.maximumNumberOfTouches = 1
 
-        // Two-finger tap reveals/hides the controls, without stealing single-finger
-        // taps (forwarded as clicks). A two-finger drag still pans the zoomed view.
+        // Two fingers → zoom/pan the local picture, or tap to toggle the HUD.
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+        let twoFingerPan = UIPanGestureRecognizer(target: self, action: #selector(handleZoomPan))
+        twoFingerPan.minimumNumberOfTouches = 2
+        twoFingerPan.maximumNumberOfTouches = 2
         let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap))
         twoFingerTap.numberOfTouchesRequired = 2
-        twoFingerTap.delegate = self
-        addGestureRecognizer(twoFingerTap)
+
+        for g in [tap, longPress, scroll, pinch, twoFingerPan, twoFingerTap] {
+            g.delegate = self
+            addGestureRecognizer(g)
+        }
 
         renderer.onVideoSizeChange = { [weak self] _ in self?.setNeedsLayout() }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
+    // MARK: Layout
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        scrollView.frame = bounds
-        if scrollView.zoomScale == 1 {
-            scrollView.contentSize = bounds.size
-            contentView.frame = CGRect(origin: .zero, size: bounds.size)
-        }
+        // Content view fills the view at 1x, then the zoom/pan transform is applied.
+        contentView.transform = .identity
+        contentView.bounds = CGRect(origin: .zero, size: bounds.size)
+        contentView.center = CGPoint(x: bounds.midX, y: bounds.midY)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         renderer.layer.frame = contentView.bounds
         CATransaction.commit()
+        applyTransform()
+    }
+
+    private func applyTransform() {
+        clampOffset()
+        contentView.transform = CGAffineTransform(scaleX: zoomScale, y: zoomScale)
+        contentView.center = CGPoint(x: bounds.midX + panOffset.x, y: bounds.midY + panOffset.y)
+    }
+
+    /// Keeps the scaled content covering the viewport so panning never reveals black.
+    private func clampOffset() {
+        let maxX = max(0, (zoomScale - 1) * bounds.width / 2)
+        let maxY = max(0, (zoomScale - 1) * bounds.height / 2)
+        panOffset.x = min(max(panOffset.x, -maxX), maxX)
+        panOffset.y = min(max(panOffset.y, -maxY), maxY)
+        if zoomScale <= 1 { panOffset = .zero }
     }
 
     // MARK: Coordinate mapping
 
-    /// The rectangle the video actually occupies inside the content view (letterboxed).
+    /// The rectangle the video occupies inside the (unscaled) content view.
     private var videoRect: CGRect {
         let size = renderer.videoSize
         guard size.width > 0, size.height > 0 else { return contentView.bounds }
         return AVMakeRect(aspectRatio: size, insideRect: contentView.bounds)
     }
 
+    /// Maps a point in the content view (UIKit already accounts for the zoom
+    /// transform in `location(in:)`) to a point normalized to the video.
     private func normalized(_ point: CGPoint) -> NormalizedPoint? {
         let rect = videoRect
         guard rect.contains(point) else { return nil }
         return NormalizedPoint(x: (point.x - rect.minX) / rect.width, y: (point.y - rect.minY) / rect.height)
     }
 
-    // MARK: Gestures
-
-    @objc private func handleTwoFingerTap() {
-        onToggleHUD?()
-    }
+    // MARK: One-finger gestures → remote input
 
     @objc private func handleTap(_ g: UITapGestureRecognizer) {
         guard let p = normalized(g.location(in: contentView)) else { return }
@@ -120,32 +145,72 @@ final class StreamUIView: UIView, UIScrollViewDelegate, UIGestureRecognizerDeleg
         onInput?(.longPress(at: p))
     }
 
-    @objc private func handlePan(_ g: UIPanGestureRecognizer) {
+    @objc private func handleScroll(_ g: UIPanGestureRecognizer) {
         let location = g.location(in: contentView)
         switch g.state {
         case .began:
-            lastPanPoint = location
+            lastScrollPoint = location
         case .changed:
-            let dx = (location.x - lastPanPoint.x) / scrollView.zoomScale
-            let dy = (location.y - lastPanPoint.y) / scrollView.zoomScale
-            lastPanPoint = location
+            let dx = location.x - lastScrollPoint.x
+            let dy = location.y - lastScrollPoint.y
+            lastScrollPoint = location
             guard let p = normalized(location), dx != 0 || dy != 0 else { return }
-            // Scale client points to host points so one finger-length scrolls about the same distance.
-            let hostPerClient = renderer.videoSize.width > 0 ? (videoRect.width > 0 ? 1 / (videoRect.width / contentView.bounds.width) : 1) : 1
-            onInput?(.scroll(at: p, dx: dx * hostPerClient, dy: dy * hostPerClient))
+            // Convert content-view points to host points so a finger-length
+            // scroll moves about the same distance on the Mac.
+            let scale = videoRect.width > 0 ? contentView.bounds.width / videoRect.width : 1
+            onInput?(.scroll(at: p, dx: dx * scale, dy: dy * scale))
+        default:
+            break
+        }
+    }
+
+    // MARK: Two-finger gestures → local zoom/pan, HUD
+
+    @objc private func handleTwoFingerTap() {
+        onToggleHUD?()
+    }
+
+    @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
+        switch g.state {
+        case .began:
+            pinchStartScale = zoomScale
+            pinchStartOffset = panOffset
+            pinchAnchor = g.location(in: self)
+        case .changed:
+            let newScale = min(max(pinchStartScale * g.scale, 1), maxZoom)
+            // Keep the point under the pinch fixed on screen as it scales.
+            let anchorRel = CGPoint(x: pinchAnchor.x - bounds.midX, y: pinchAnchor.y - bounds.midY)
+            let ratio = newScale / pinchStartScale
+            panOffset = CGPoint(x: anchorRel.x - (anchorRel.x - pinchStartOffset.x) * ratio,
+                                y: anchorRel.y - (anchorRel.y - pinchStartOffset.y) * ratio)
+            zoomScale = newScale
+            applyTransform()
+        case .ended, .cancelled:
+            if zoomScale <= 1.02 { zoomScale = 1; panOffset = .zero; applyTransform() }
+        default:
+            break
+        }
+    }
+
+    @objc private func handleZoomPan(_ g: UIPanGestureRecognizer) {
+        guard zoomScale > 1 else { return }
+        switch g.state {
+        case .began:
+            panStartOffset = panOffset
+        case .changed:
+            let t = g.translation(in: self)
+            panOffset = CGPoint(x: panStartOffset.x + t.x, y: panStartOffset.y + t.y)
+            applyTransform()
         default:
             break
         }
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        // Let the pinch zoom proceed alongside our recognizers.
-        other is UIPinchGestureRecognizer
+        // Pinch and two-finger pan work together; everything else stays exclusive.
+        (gestureRecognizer is UIPinchGestureRecognizer && other is UIPanGestureRecognizer)
+            || (gestureRecognizer is UIPanGestureRecognizer && other is UIPinchGestureRecognizer)
     }
-
-    // MARK: UIScrollViewDelegate
-
-    func viewForZooming(in scrollView: UIScrollView) -> UIView? { contentView }
 
     // MARK: UIKeyInput
 
@@ -158,6 +223,9 @@ final class StreamUIView: UIView, UIScrollViewDelegate, UIGestureRecognizerDeleg
     var smartQuotesType: UITextSmartQuotesType { .no }
     var smartDashesType: UITextSmartDashesType { .no }
     var smartInsertDeleteType: UITextSmartInsertDeleteType { .no }
+    var inlinePredictionType: UITextInlinePredictionType { .no }
+    // Keys are forwarded verbatim to the host, so the local field must never
+    // autocorrect, autocapitalize, or predict; it is a raw key conduit.
 
     func insertText(_ text: String) {
         if text == "\n" {
