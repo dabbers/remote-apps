@@ -25,6 +25,7 @@ final class ClientModel: ObservableObject {
     @Published var keyboardVisible = false
     @Published var hudVisible = true
     @Published var menu: [MenuNode] = []
+    @Published var launchable: [LaunchableApp] = []
 
     let renderer = VideoRenderer()
     /// Full-screen drawable size in points. Read lazily: at app init the
@@ -240,6 +241,18 @@ final class ClientModel: ObservableObject {
         phase = .streaming
     }
 
+    func requestLaunchable() { connection?.send(.requestLaunchable) }
+
+    /// Launch an installed app (server opens it if needed) and stream it.
+    func launchApp(_ app: LaunchableApp) {
+        renderer.reset()
+        geometry = nil
+        menu = []
+        latencyEMA = nil
+        connection?.send(.launchApp(bundleIdentifier: app.bundleIdentifier))
+        phase = .streaming
+    }
+
     func backToApps() {
         keyboardVisible = false
         phase = .apps
@@ -280,6 +293,8 @@ final class ClientModel: ObservableObject {
             renderer.apply(config)
         case .menuTree(let tree):
             menu = tree
+        case .launchableApps(let list):
+            launchable = list
         case .error(let message):
             errorMessage = message
         case .ping(let n):

@@ -122,31 +122,98 @@ struct PairingView: View {
 
 struct AppListView: View {
     @EnvironmentObject var model: ClientModel
+    @State private var showingLaunch = false
 
     var body: some View {
-        List(model.apps) { app in
-            Button { model.select(app) } label: {
-                HStack(spacing: 12) {
-                    if let data = app.iconPNG, let image = UIImage(data: data) {
-                        Image(uiImage: image).resizable().frame(width: 36, height: 36)
-                    } else {
-                        Image(systemName: "macwindow").frame(width: 36, height: 36)
+        List {
+            Section("Running") {
+                ForEach(model.apps) { app in
+                    Button { model.select(app) } label: {
+                        HStack(spacing: 12) {
+                            icon(app.iconPNG)
+                            VStack(alignment: .leading) {
+                                Text(app.name)
+                                Text("\(app.windowCount) window\(app.windowCount == 1 ? "" : "s") · \(app.bundleIdentifier)")
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
                     }
-                    VStack(alignment: .leading) {
-                        Text(app.name)
-                        Text("\(app.windowCount) window\(app.windowCount == 1 ? "" : "s") · \(app.bundleIdentifier)")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
+                    .tint(.primary)
                 }
             }
-            .tint(.primary)
         }
         .navigationTitle(model.serverName)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Disconnect") { model.disconnect() } }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    model.requestLaunchable()
+                    showingLaunch = true
+                } label: { Image(systemName: "plus.app") }
+            }
             ToolbarItem(placement: .primaryAction) { Button { model.refreshApps() } label: { Image(systemName: "arrow.clockwise") } }
         }
         .refreshable { model.refreshApps() }
+        .sheet(isPresented: $showingLaunch) {
+            LaunchAppsView { app in
+                model.launchApp(app)
+                showingLaunch = false
+            }
+            .environmentObject(model)
+        }
+    }
+
+    @ViewBuilder
+    private func icon(_ data: Data?) -> some View {
+        if let data, let image = UIImage(data: data) {
+            Image(uiImage: image).resizable().frame(width: 36, height: 36)
+        } else {
+            Image(systemName: "macwindow").frame(width: 36, height: 36)
+        }
+    }
+}
+
+/// Picker of installed apps to launch (read from the Mac on demand).
+struct LaunchAppsView: View {
+    @EnvironmentObject var model: ClientModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+    let onLaunch: (LaunchableApp) -> Void
+
+    private var filtered: [LaunchableApp] {
+        guard !search.isEmpty else { return model.launchable }
+        return model.launchable.filter { $0.name.localizedCaseInsensitiveContains(search) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if model.launchable.isEmpty {
+                    HStack { ProgressView(); Text("Loading apps…").foregroundStyle(.secondary) }
+                } else {
+                    List(filtered) { app in
+                        Button { onLaunch(app) } label: {
+                            HStack(spacing: 12) {
+                                if let data = app.iconPNG, let image = UIImage(data: data) {
+                                    Image(uiImage: image).resizable().frame(width: 32, height: 32)
+                                } else {
+                                    Image(systemName: "app").frame(width: 32, height: 32)
+                                }
+                                Text(app.name)
+                            }
+                        }
+                        .tint(.primary)
+                    }
+                    .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always))
+                }
+            }
+            .navigationTitle("Open an app")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) { Button { model.requestLaunchable() } label: { Image(systemName: "arrow.clockwise") } }
+            }
+        }
     }
 }
 
@@ -159,6 +226,14 @@ struct StreamingScreen: View {
             // Ignore the notch/home-indicator but NOT the keyboard, so the video
             // area shrinks to sit above the keyboard when it is up.
             StreamView().ignoresSafeArea(.container, edges: .all)
+            if model.geometry == nil {
+                VStack(spacing: 10) {
+                    ProgressView().tint(.white)
+                    Text("Starting…").foregroundStyle(.white.opacity(0.7)).font(.callout)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
+            }
             if model.hudVisible {
                 HStack(spacing: 12) {
                     Button { model.backToApps() } label: { Image(systemName: "chevron.left") }

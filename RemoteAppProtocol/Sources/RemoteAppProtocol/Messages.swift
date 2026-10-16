@@ -87,6 +87,22 @@ public struct AppInfo: Codable, Sendable, Equatable, Identifiable, Hashable {
     }
 }
 
+/// An installed app that can be launched (and then streamed), whether or not
+/// it is currently running.
+public struct LaunchableApp: Codable, Sendable, Equatable, Identifiable, Hashable {
+    public var bundleIdentifier: String
+    public var name: String
+    public var iconPNG: Data?
+
+    public var id: String { bundleIdentifier }
+
+    public init(bundleIdentifier: String, name: String, iconPNG: Data? = nil) {
+        self.bundleIdentifier = bundleIdentifier
+        self.name = name
+        self.iconPNG = iconPNG
+    }
+}
+
 public struct SelectApp: Codable, Sendable, Equatable {
     public var pid: Int32
     public init(pid: Int32) { self.pid = pid }
@@ -229,6 +245,13 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case listApps
     case appList([AppInfo])
     case selectApp(SelectApp)
+    /// Client asks for the list of installed (launchable) apps.
+    case requestLaunchable
+    /// Server's list of installed apps that can be launched.
+    case launchableApps([LaunchableApp])
+    /// Client asks the server to launch an app (if not already running) and
+    /// stream it once it has a window.
+    case launchApp(bundleIdentifier: String)
     case screenSize(ScreenSize)
     case windowGeometry(WindowGeometry)
     case videoConfig(VideoConfig)

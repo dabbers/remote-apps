@@ -140,6 +140,13 @@ final class ClientSession {
             Task { await self.sendAppList(asHelloAck: false) }
         case .selectApp(let select):
             Task { await self.selectApp(pid: select.pid) }
+        case .requestLaunchable:
+            pipelineQueue.async { [weak self] in
+                let apps = LaunchableApps.fetch()
+                self?.send(.launchableApps(apps))
+            }
+        case .launchApp(let bundleID):
+            Task { await self.launchApp(bundleIdentifier: bundleID) }
         case .screenSize(let size):
             clientScreen = size
             Task { await self.applyClientSize() }
@@ -195,6 +202,34 @@ final class ClientSession {
     }
 
     // MARK: Streaming
+
+    /// Launches an installed app (or activates it if already running), waits for
+    /// it to have a window, then streams it.
+    private func launchApp(bundleIdentifier: String) async {
+        guard let url = LaunchableApps.url(forBundleIdentifier: bundleIdentifier) else {
+            send(.error(message: "app \(bundleIdentifier) not found"))
+            return
+        }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        do {
+            let app = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
+            let pid = app.processIdentifier
+            log("launching \(app.localizedName ?? bundleIdentifier)")
+            // Wait for a main window to appear (new apps open one asynchronously).
+            for _ in 0..<40 {   // up to ~8s
+                if WindowControl.mainWindow(pid: pid) != nil { break }
+                try await Task.sleep(nanoseconds: 200_000_000)
+            }
+            guard WindowControl.mainWindow(pid: pid) != nil else {
+                send(.error(message: "\(app.localizedName ?? bundleIdentifier) launched but opened no window"))
+                return
+            }
+            await selectApp(pid: pid)
+        } catch {
+            send(.error(message: "could not launch: \(error.localizedDescription)"))
+        }
+    }
 
     private func selectApp(pid: pid_t) async {
         teardown()

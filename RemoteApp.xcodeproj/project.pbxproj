@@ -11,6 +11,7 @@
 		0ED488BAA9FB40E547BA6A95 /* ShareableApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83AEF0BAE7048C52AFBC2D8C /* ShareableApps.swift */; };
 		12F06D857A2A364E7A881428 /* H264Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37756DA6723350EA2607DF31 /* H264Encoder.swift */; };
 		16AA075C8E7B35C7A03ACCFF /* RemoteAppServerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECA57E4AC9F89F6BD35826EA /* RemoteAppServerApp.swift */; };
+		1BDB82B6735FCFE13F992571 /* LaunchableApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C8C2DC29DAF963F2CD0689C /* LaunchableApps.swift */; };
 		289208E6AB601126F1E709B9 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B98A4ECDEDB91F689782191 /* Views.swift */; };
 		2F74280708A313195DE4B0BC /* PairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB3AFF61CBE4628DED780DC /* PairingStore.swift */; };
 		33E84B19E080AF59553E4272 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2664C6C345B0B78205068A5 /* ContentView.swift */; };
@@ -44,6 +45,7 @@
 		79931C7387E1C6E61CD94836 /* MenuReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuReader.swift; sourceTree = "<group>"; };
 		7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputInjector.swift; sourceTree = "<group>"; };
 		83AEF0BAE7048C52AFBC2D8C /* ShareableApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareableApps.swift; sourceTree = "<group>"; };
+		9C8C2DC29DAF963F2CD0689C /* LaunchableApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchableApps.swift; sourceTree = "<group>"; };
 		A7E18DD6AA348A244BA4779B /* RemoteAppClient.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RemoteAppClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailscaleInfo.swift; sourceTree = "<group>"; };
 		AE167BA201EC33D48EFFFAC1 /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
@@ -142,6 +144,7 @@
 				E2664C6C345B0B78205068A5 /* ContentView.swift */,
 				37756DA6723350EA2607DF31 /* H264Encoder.swift */,
 				7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */,
+				9C8C2DC29DAF963F2CD0689C /* LaunchableApps.swift */,
 				79931C7387E1C6E61CD94836 /* MenuReader.swift */,
 				EBB3AFF61CBE4628DED780DC /* PairingStore.swift */,
 				ECA57E4AC9F89F6BD35826EA /* RemoteAppServerApp.swift */,
@@ -267,6 +270,7 @@
 				33E84B19E080AF59553E4272 /* ContentView.swift in Sources */,
 				12F06D857A2A364E7A881428 /* H264Encoder.swift in Sources */,
 				91F1ECD8C8C9241E16795CA9 /* InputInjector.swift in Sources */,
+				1BDB82B6735FCFE13F992571 /* LaunchableApps.swift in Sources */,
 				FE23689877502420CE624FEB /* MenuReader.swift in Sources */,
 				2F74280708A313195DE4B0BC /* PairingStore.swift in Sources */,
 				16AA075C8E7B35C7A03ACCFF /* RemoteAppServerApp.swift in Sources */,

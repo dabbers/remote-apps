@@ -26,7 +26,8 @@ Scripts/gen-cert.sh  regenerates the self-signed dev TLS identity (Server/Resour
 | Binding | Listeners scoped (`IP_BOUND_IF`) to the Tailscale interface (`utun*:53123`) and loopback (`lo0:53124`) only, never a public interface | — |
 | Transport | TLS 1.3 over TCP over the WireGuard tunnel (default), with a bundled self-signed identity; QUIC selectable for LAN | Trusts any server certificate (fine: WireGuard already encrypts and authenticates the tailnet) |
 | Auth | 6-digit pairing code shown in the server window; the device is then remembered with a persistent token | Enter the code once per device; later connects skip it |
-| App list | `SCShareableContent` → apps with normal on-screen windows, with icons | List with icons |
+| App list | `SCShareableContent` → running apps with windows; plus all installed apps enumerated for launching | "Running" list, and a + button to open any installed app |
+| Launch | Opens an installed app via `NSWorkspace`, waits for its window, then streams it | Searchable installed-apps picker |
 | Window sizing | Accessibility API moves/resizes the app's main window to the phone's point size, then reports what the app accepted | Letterboxes (`resizeAspect`) when the app clamped; pinch to zoom |
 | Capture | `SCContentFilter(display:including:[app])` cropped with `sourceRect` to the main window: menus, sheets and popovers of that app are included, other apps are not | — |
 | Encode/decode | `VTCompressionSession`, H.264 High, real-time, no B-frames, 60 fps, 12 Mbit/s | `AVSampleBufferDisplayLayer` (VideoToolbox decode) fed AVCC access units |
