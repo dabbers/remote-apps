@@ -13,3 +13,10 @@ Config/Local.xcconfig
 *.p12
 *.pem
 *.mobileprovision
+
+# Windows (.NET) build output and IDE state.
+Windows/**/bin/
+Windows/**/obj/
+Windows/.vs/
+*.user
+*.pfx

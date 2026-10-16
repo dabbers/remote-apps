@@ -1,10 +1,11 @@
 # RemoteApp wire protocol
 
 A language- and OS-neutral description of the protocol spoken between a
-RemoteApp **client** (iOS/iPadOS, macOS Catalyst, and — being added — Windows)
-and a RemoteApp **server** (macOS today, Windows planned). The reference
-implementation is the Swift package `RemoteAppProtocol/`; this document is the
-contract a non-Swift implementation (e.g. a C#/.NET Windows client) must match.
+RemoteApp **client** (iOS/iPadOS, macOS Catalyst, Windows) and a RemoteApp
+**server** (macOS, Windows). The reference implementation is the Swift package
+`RemoteAppProtocol/`; the C#/.NET implementation is `Windows/RemoteApp.Protocol`
+(its tests round-trip every sample in §5). This document is the contract both
+must match.
 
 Everything here is derived from the Swift types in
 `RemoteAppProtocol/Sources/RemoteAppProtocol/`. Where the JSON shape is subtle,
@@ -246,7 +247,11 @@ server scales them to host points.
   equal macOS virtual key codes, but treat them as protocol values):
   `Return=36, Delete/Backspace=51, Tab=48, Escape=53, LeftArrow=123,
   RightArrow=124, DownArrow=125, UpArrow=126`. A Windows client maps its own VK
-  codes to these constants.
+  codes to these constants. Extended values a desktop client may also send
+  (macOS virtual key codes, which a Mac server posts verbatim and a Windows
+  server maps): `ForwardDelete=117, Home=115, End=119, PageUp=116,
+  PageDown=121, Space=49, F1=122, F2=120, F3=99, F4=118, F5=96, F6=97, F7=98,
+  F8=100, F9=101, F10=109, F11=103, F12=111`.
 - **`modifiers`** — integer bitmask: **shift=1, control=2, option(alt)=4,
   command=8** (OR them together, e.g. `⇧⌥` = 5, `⌘` = 8).
 - **`isDown`** — currently always `true`; the server synthesises a down+up pair.
@@ -273,7 +278,32 @@ Win32 clipboard (CF_UNICODETEXT, CF_DIB/PNG, CF_HDROP); write received files to
 a folder and offer them. A single copy may carry several items (e.g. text + an
 image); take what you can use.
 
-## 11. Windows C# client — first milestone
+## 11. Windows notes
+
+Both sides exist in `Windows/` (see the README). Platform specifics of the
+**Windows server**:
+
+- `hostScale` is the primary monitor's DPI / 96; host points are DIPs. The
+  shared window is moved to the top-left of the primary work area and its
+  *visible* (DWM) bounds are resized to the client's screen size.
+- `AppInfo.bundleIdentifier` is the executable's file name (e.g. `notepad.exe`);
+  `LaunchableApp.bundleIdentifier` is the shell AppsFolder item path (an
+  AppUserModelID for Store apps, a parsing name for classic ones), which
+  `launchApp` opens exactly like a Start menu click.
+- `menuTree` is read from the window's classic Win32 menu bar (`GetMenu`);
+  shortcut hints are whatever follows the tab in the item text (e.g. `Ctrl+S`).
+  Apps that draw their own menus report an empty tree.
+- Modifiers: `command` and `control` both become Ctrl, `option` Alt, `shift`
+  Shift. `text` is typed as real key presses when the active layout has the
+  character, else as a Unicode key event.
+- `videoConfig` is sent before the first keyframe of each encoder instance
+  (every resize rebuilds the encoder) and whenever the SPS/PPS change.
+
+A client must keep `videoConfig` ordered with the frames that follow it: both
+arrive on the same stream, and the keyframe right after a config will not
+decode under the previous configuration.
+
+## 12. Windows C# client — first milestone (historical)
 
 Target: **Windows client → existing macOS server**, TCP+TLS.
 

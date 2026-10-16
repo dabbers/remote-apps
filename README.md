@@ -1,9 +1,11 @@
-# RemoteApp — stream one macOS app window to an iPhone
+# RemoteApp — stream one app window to another device
 
-Proof of concept: a macOS server captures a single app's main window with
-ScreenCaptureKit, encodes it with hardware H.264, and streams it over QUIC to
-an iOS client that shows it full screen and sends taps, scrolls and keystrokes
-back.
+Proof of concept: a server captures a single app's main window, encodes it
+with hardware H.264, and streams it to a client that shows it and sends taps,
+scrolls and keystrokes back. The macOS server streams to an iPhone/iPad/Mac
+client; the **Windows client and server** (`Windows/`) show a remote app as a
+"virtual" application window on a PC and share a Windows app the same way.
+See [Windows](#windows).
 
 **The server is reachable only over your Tailscale tailnet, never the open
 internet.** It binds to the Mac's tailnet address and to loopback, and to
@@ -14,6 +16,8 @@ nothing else. Discovery and connection use the Tailscale MagicDNS name. See
 RemoteAppProtocol/   Swift package shared by both apps: messages, framing, transport
 Server/              macOS SwiftUI app (RemoteAppServer)
 Client/              iOS SwiftUI app (RemoteAppClient)
+Windows/             .NET solution: protocol library + tests, Windows client, Windows server
+PROTOCOL.md          language-neutral wire spec (the contract between all of the above)
 project.yml          xcodegen spec → RemoteApp.xcodeproj
 Config/              build config: Base.xcconfig + Local.xcconfig.example (signing)
 ```
@@ -195,11 +199,106 @@ xcodebuild -project RemoteApp.xcodeproj -scheme RemoteAppClient -configuration D
 - Latency is bounded by dropping frames when more than 4 are in flight; on
   slow networks the picture updates in bursts instead of lagging.
 
+## Windows
+
+`Windows/RemoteApp.slnx` (.NET 10, C#, WinForms + Direct2D + Media Foundation,
+Win32 via [CsWin32](https://github.com/microsoft/CsWin32)) contains:
+
+| Project | What it is |
+|---|---|
+| `RemoteApp.Protocol` | The wire protocol from `PROTOCOL.md`: framing, the JSON message shapes (matching Swift's Codable envelope), TLS transport, H.264 NAL helpers. Platform-neutral. |
+| `RemoteApp.Protocol.Tests` | xUnit tests: every sample in `PROTOCOL.md` §5 round-trips, framing, NAL conversion. |
+| `RemoteApp.WindowsCommon` | Clipboard bridge (Win32 clipboard ↔ neutral items) and icon helpers shared by client and server. |
+| `RemoteApp.Client` | **Windows client.** Connects to a macOS or Windows server and shows the remote app as a *virtual application*: a normal, resizable Windows window with the remote app's title and icon, the remote menu bar reproduced as native menus, and the host window kept the same size as this one. |
+| `RemoteApp.Server` | **Windows server.** Shares one Windows app with any client: DXGI Desktop Duplication capture cropped to the window (menus, dialogs and tooltips included), Media Foundation H.264 (NVIDIA/Intel/AMD hardware MFTs, software fallback), `SendInput` injection, Win32 menu bar, clipboard, Tailscale-only listeners. |
+
+**Build and run** (needs the .NET 10 SDK; no Visual Studio required):
+
+```bash
+dotnet build Windows/RemoteApp.slnx
+```
+
+```bash
+dotnet test Windows/RemoteApp.Protocol.Tests
+```
+
+```bash
+dotnet run --project Windows/RemoteApp.Server
+```
+
+```bash
+dotnet run --project Windows/RemoteApp.Client
+```
+
+**Client.** Enter the server's MagicDNS name or tailnet IP (or
+`127.0.0.1:53124` for a server on the same PC), enter the pairing code once
+(the server remembers the device), pick a running app or *Open an app…* to
+launch an installed one. The app opens as its own window:
+
+- **Resizing is two-way.** Resize the window and the host resizes its window
+  to match (debounced, in points); if the app refuses a size (minimum sizes),
+  the host's real geometry snaps this window back, so the picture is normally
+  pixel-exact rather than letterboxed. DPI scaling on both ends is accounted
+  for (`screen.scale` / `hostScale`).
+- **Menus.** The host app's menu bar (read through Accessibility on a Mac,
+  `GetMenu` on Windows) appears in the window's menu bar, with enabled/checked
+  state and shortcut hints; the *Remote* menu manages the session, the shared
+  clipboard (pull the host's, push this PC's, send files) and options.
+- **Keyboard.** Keys go to the host first. Ctrl sends ⌘ by default (so Ctrl+C
+  is ⌘C on a Mac), Alt sends ⌥; *Remote ▸ Ctrl Key Sends ⌘ Command* switches
+  Ctrl to ⌃. Printable text is sent as text (layout-independent); arrows, Tab,
+  Return, Escape, Delete, Home/End, Page Up/Down and F-keys as protocol key codes.
+- **Mouse.** Click = tap (double-clicks by timing on the host), press-and-move
+  = drag, right/middle click, wheel and horizontal wheel = scroll.
+- Settings (device ID, recent hosts, pairing tokens) live in
+  `%APPDATA%\RemoteAppClient\settings.json`. Received files land in
+  `Downloads\RemoteApp`.
+
+**Server.** Mirrors the Mac server: pairing code, remembered devices, listeners
+bound to the Tailscale address (port 53123, IPv4 and IPv6) and loopback
+(53124) only, a log (also in `%LOCALAPPDATA%\RemoteAppServer\RemoteAppServer.log`).
+The TLS identity is generated on first launch into
+`%LOCALAPPDATA%\RemoteAppServer\server.pfx` (random per-install passphrase
+beside it) — nothing is bundled or committed. Host "points" are DIPs at the
+monitor's DPI (`hostScale` = DPI / 96); the shared window is moved to the
+top-left of the primary work area and resized to the client's size.
+
+**Smoke test.** The client has an unattended mode used to verify a build against
+a running server; it connects, pairs, selects (or launches) an app, types,
+resizes, pulls the clipboard, then writes a report and a screenshot:
+
+```bash
+Windows/RemoteApp.Client/bin/Debug/net10.0-windows/RemoteAppClient.exe --smoke 127.0.0.1:53124 <code|-> Notepad report.txt shot.png 12
+```
+
+The server has `RemoteAppServer.exe --type-test "text"`, which types into its own
+window through the same input injector.
+
+**Windows limitations (prototype).**
+
+- Capture is the monitor region under the window, so other windows overlapping
+  it are visible (as on the Mac, "the host is in use"); the window is activated
+  before input is injected and input is dropped if it cannot be brought to the
+  front. Only the primary graphics adapter's monitors can be captured.
+- Classic Win32 menu bars only; apps that draw their own menus (WinUI, Electron,
+  Office) report none — their menus still appear in the video.
+- BGRA→NV12 (server) and NV12→BGRA (client) run on the CPU; a D3D11 video
+  processor is the obvious upgrade for large windows.
+- The mouse pointer is composited from the duplication API's pointer shape, but
+  pointer-only updates are not streamed, so the remote cursor moves with the
+  next content change.
+- Typing a string into XAML/WinUI apps is paced (a few ms per character) because
+  they read modifier state late; single keystrokes are unaffected. Characters
+  the active keyboard layout cannot produce are sent as Unicode key events,
+  which classic Win32 controls take exactly but the WinUI Notepad flattens to
+  the base letter (é → e); use the shared clipboard for such text.
+- TLS/TCP only (no QUIC), no Bonjour; connect by name or address.
+
 ## Next steps
 
-Windows host (Windows.Graphics.Capture + Media Foundation + SendInput), remote
-access (WebRTC or Tailscale), HEVC, drag gestures, certificate pinning and real
-account auth.
+Remote access beyond the tailnet (WebRTC), HEVC, GPU color conversion on
+Windows, a `move` input event for hover, drag gestures on iOS, certificate
+pinning and real account auth.
 
 ## License
 

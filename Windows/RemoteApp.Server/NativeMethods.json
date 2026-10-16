@@ -1,0 +1,17 @@
+{
+  "$schema": "https://aka.ms/CsWin32.schema.json",
+  "allowMarshaling": true,
+  "useSafeHandles": true,
+  "comInterop": {
+    "preserveSigMethods": [
+      "IMFTransform.ProcessOutput",
+      "IMFTransform.ProcessInput",
+      "IMFTransform.GetOutputAvailableType",
+      "IMFTransform.GetInputAvailableType",
+      "IDXGIOutputDuplication.AcquireNextFrame",
+      "IMFMediaEventGenerator.GetEvent",
+      "ICodecAPI.SetValue",
+      "ICodecAPI.IsSupported"
+    ]
+  }
+}

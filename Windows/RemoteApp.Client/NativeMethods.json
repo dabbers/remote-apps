@@ -1,0 +1,18 @@
+{
+  "$schema": "https://aka.ms/CsWin32.schema.json",
+  "allowMarshaling": true,
+  "useSafeHandles": true,
+  "comInterop": {
+    "preserveSigMethods": [
+      "IMFTransform.ProcessOutput",
+      "IMFTransform.ProcessInput",
+      "IMFTransform.GetOutputAvailableType",
+      "IMFTransform.GetInputAvailableType",
+      "ID2D1RenderTarget.EndDraw",
+      "ID2D1HwndRenderTarget.EndDraw",
+      "ID2D1HwndRenderTarget.Resize",
+      "ICodecAPI.SetValue",
+      "ICodecAPI.IsSupported"
+    ]
+  }
+}

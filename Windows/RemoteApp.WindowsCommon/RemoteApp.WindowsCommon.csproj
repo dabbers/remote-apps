@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Code shared by the Windows client and server that needs WinForms/GDI but
+       no generated Win32 interop: the clipboard bridge and PNG icon helpers. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>RemoteApp.WindowsCommon</RootNamespace>
+    <AssemblyName>RemoteApp.WindowsCommon</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RemoteApp.Protocol\RemoteApp.Protocol.csproj" />
+  </ItemGroup>
+</Project>

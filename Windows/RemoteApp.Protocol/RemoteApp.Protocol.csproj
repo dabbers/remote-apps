@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Wire protocol shared by the Windows client and server: framing, JSON
+       messages (matching the Swift Codable shapes in PROTOCOL.md), the TLS
+       transport and H.264 NAL helpers. Platform-neutral so the tests run anywhere. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>RemoteApp.Protocol</RootNamespace>
+    <AssemblyName>RemoteApp.Protocol</AssemblyName>
+  </PropertyGroup>
+</Project>
