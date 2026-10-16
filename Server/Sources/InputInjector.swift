@@ -65,8 +65,14 @@ final class InputInjector {
                 y: windowFrame.minY + min(max(p.y, 0), 1) * windowFrame.height)
     }
 
+    /// Post through the HID event stream so the window server hit-tests the
+    /// event like a real click/keystroke. Posting straight to the PID
+    /// (`postToPid`) leaves keystrokes working but mouse clicks are not
+    /// reliably hit-tested, so they would not place the caret or hit controls.
+    /// The trade-off is that the host's real cursor moves (fine when the Mac is
+    /// being driven remotely); the target app is brought frontmost first.
     private func post(_ event: CGEvent?) {
-        event?.postToPid(pid)
+        event?.post(tap: .cghidEventTap)
     }
 
     private func mouseEvent(_ type: CGEventType, at point: CGPoint, button: CGMouseButton, clickState: Int64 = 1) -> CGEvent? {
