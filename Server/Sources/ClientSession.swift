@@ -156,6 +156,13 @@ final class ClientSession {
             sendMenu()
         case .menuAction(let path):
             performMenuAction(path: path)
+        case .requestClipboard:
+            Task { @MainActor in self.send(.clipboard(ClipboardBridge.read())) }
+        case .clipboard(let content):
+            Task { @MainActor in
+                ClipboardBridge.write(content)
+                self.log("clipboard set from \(self.clientName) (\(content.items.count) item\(content.items.count == 1 ? "" : "s"))")
+            }
         case .ping(let n):
             send(.pong(n))
         default:

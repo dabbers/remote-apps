@@ -47,6 +47,14 @@ final class ClientModel: ObservableObject {
     /// Drives the "Open an app" sheet (also from the Mac menu bar).
     @Published var showLaunchSheet = false
 
+    // MARK: Shared clipboard
+    /// Drives the clipboard actions sheet.
+    @Published var showClipboardSheet = false
+    /// Files/images received from the Mac, awaiting the user's save choice.
+    @Published var receivedClipboardItems: [ClipboardItem] = []
+    /// Transient confirmation banner for clipboard actions.
+    @Published var clipboardStatus: String?
+
     let renderer = VideoRenderer()
     /// Full-screen drawable size in points. Read lazily: at app init the
     /// window does not exist yet and UIScreen may report a placeholder size.
@@ -280,6 +288,33 @@ final class ClientModel: ObservableObject {
 
     func performMenu(path: [Int]) { connection?.send(.menuAction(path: path)) }
 
+    // MARK: Shared clipboard
+
+    /// Pull the Mac's clipboard onto this device.
+    func getClipboardFromMac() { connection?.send(.requestClipboard) }
+
+    /// Push this device's clipboard (text/image) to the Mac.
+    func sendClipboardToMac() {
+        let content = Clipboard.current()
+        guard !content.isEmpty else { setClipboardStatus("This device's clipboard is empty"); return }
+        connection?.send(.clipboard(content))
+        setClipboardStatus("Sent \(content.items.count) item\(content.items.count == 1 ? "" : "s") to Mac")
+    }
+
+    /// Push picked files/photos to the Mac (they land there as files).
+    func sendItemsToMac(_ items: [ClipboardItem]) {
+        guard !items.isEmpty else { return }
+        connection?.send(.clipboard(ClipboardContent(items: items)))
+        setClipboardStatus("Sent \(items.count) item\(items.count == 1 ? "" : "s") to Mac")
+    }
+
+    private func setClipboardStatus(_ text: String) {
+        clipboardStatus = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            if self?.clipboardStatus == text { self?.clipboardStatus = nil }
+        }
+    }
+
     // MARK: Incoming
 
     private func handle(_ message: Message) {
@@ -307,6 +342,15 @@ final class ClientModel: ObservableObject {
             menu = tree
         case .launchableApps(let list):
             launchable = list
+        case .clipboard(let content):
+            // Text/images go straight onto this device's clipboard so Paste
+            // works at once; files/images are also offered for saving.
+            let saveable = Clipboard.apply(content)
+            if saveable.isEmpty {
+                setClipboardStatus(content.text != nil ? "Copied text from Mac" : "Mac clipboard is empty")
+            } else {
+                receivedClipboardItems = saveable
+            }
         case .error(let message):
             errorMessage = message
         case .ping(let n):

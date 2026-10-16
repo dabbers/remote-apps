@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 import RemoteAppProtocol
 
 struct RootView: View {
@@ -242,6 +243,7 @@ struct StreamingScreen: View {
                         model.requestMenu()
                         showingMenu = true
                     } label: { Image(systemName: "menubar.rectangle") }
+                    Button { model.showClipboardSheet = true } label: { Image(systemName: "doc.on.clipboard") }
                     Button { model.keyboardVisible.toggle() } label: {
                         Image(systemName: model.keyboardVisible ? "keyboard.chevron.compact.down" : "keyboard")
                     }
@@ -269,8 +271,20 @@ struct StreamingScreen: View {
                     .padding(.top, 10)
                     .allowsHitTesting(false)
             }
+            if let status = model.clipboardStatus {
+                Text(status)
+                    .font(.footnote)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.black.opacity(0.7), in: Capsule())
+                    .foregroundStyle(.white)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 28)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: model.hudVisible)
+        .animation(.easeInOut(duration: 0.2), value: model.clipboardStatus)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .sheet(isPresented: $showingMenu) {
@@ -280,6 +294,140 @@ struct StreamingScreen: View {
             }, onRefresh: { model.requestMenu() })
             .environmentObject(model)
         }
+        .sheet(isPresented: $model.showClipboardSheet) {
+            ClipboardSheet().environmentObject(model)
+        }
+        .sheet(isPresented: Binding(
+            get: { !model.receivedClipboardItems.isEmpty },
+            set: { if !$0 { model.receivedClipboardItems = [] } }
+        )) {
+            ReceivedClipboardSheet(items: model.receivedClipboardItems)
+        }
+    }
+}
+
+/// Actions for the shared clipboard: pull the Mac's clipboard, or push this
+/// device's clipboard / picked photos / files to the Mac.
+struct ClipboardSheet: View {
+    @EnvironmentObject var model: ClientModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var showFileImporter = false
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button { model.getClipboardFromMac(); dismiss() } label: {
+                        Label("Get Mac Clipboard", systemImage: "arrow.down.doc")
+                    }
+                } header: {
+                    Text("From Mac")
+                } footer: {
+                    Text("Copies the Mac's clipboard here. Text and images are ready to paste; files and photos can be saved.")
+                }
+                Section {
+                    Button { model.sendClipboardToMac(); dismiss() } label: {
+                        Label("Send This Clipboard", systemImage: "arrow.up.doc")
+                    }
+                    PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images) {
+                        Label("Send Photos…", systemImage: "photo")
+                    }
+                    Button { showFileImporter = true } label: {
+                        Label("Send Files…", systemImage: "folder")
+                    }
+                } header: {
+                    Text("To Mac")
+                } footer: {
+                    Text("Photos and files land in the Mac's Downloads/RemoteApp folder and on its clipboard.")
+                }
+                if busy {
+                    Section { HStack { ProgressView(); Text("Preparing…").foregroundStyle(.secondary) } }
+                }
+            }
+            .navigationTitle("Shared Clipboard")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .onChange(of: photoItems) { _, items in Task { await sendPhotos(items) } }
+            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                Task { await sendFiles(result) }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func sendPhotos(_ items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
+        busy = true
+        var out: [ClipboardItem] = []
+        for (i, item) in items.enumerated() {
+            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+            let ext = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+            out.append(Clipboard.fileItem(data: data, name: "photo-\(i + 1).\(ext)"))
+        }
+        busy = false
+        photoItems = []
+        if !out.isEmpty { model.sendItemsToMac(out) }
+        dismiss()
+    }
+
+    private func sendFiles(_ result: Result<[URL], Error>) async {
+        guard case .success(let urls) = result, !urls.isEmpty else { return }
+        busy = true
+        var out: [ClipboardItem] = []
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            out.append(Clipboard.fileItem(data: data, name: url.lastPathComponent))
+        }
+        busy = false
+        if !out.isEmpty { model.sendItemsToMac(out) }
+        dismiss()
+    }
+}
+
+/// Files and images received from the Mac, each saveable via the share sheet
+/// (Save to Files / Save Image). Text and images are already on the clipboard.
+struct ReceivedClipboardSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    private let prepared: [(item: ClipboardItem, url: URL?)]
+
+    init(items: [ClipboardItem]) {
+        self.prepared = items.map { ($0, Clipboard.writeTemp($0)) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(Array(prepared.enumerated()), id: \.offset) { _, entry in
+                        HStack(spacing: 12) {
+                            Image(systemName: entry.item.kind == .image ? "photo" : "doc")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading) {
+                                Text(entry.item.name ?? (entry.item.kind == .image ? "Image" : "File")).lineLimit(1)
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(entry.item.data.count), countStyle: .file))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if let url = entry.url {
+                                ShareLink(item: url) { Image(systemName: "square.and.arrow.down") }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Received from Mac")
+                } footer: {
+                    Text("Text and images are already on this device's clipboard. Tap the save icon to keep a file or photo.")
+                }
+            }
+            .navigationTitle("From Mac")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .presentationDetents([.medium])
     }
 }
 

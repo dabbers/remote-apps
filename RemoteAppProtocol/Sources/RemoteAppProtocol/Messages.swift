@@ -236,6 +236,54 @@ public struct MenuNode: Codable, Sendable, Equatable {
     public var hasSubmenu: Bool { !children.isEmpty }
 }
 
+// MARK: Clipboard (platform-agnostic)
+
+/// One item on the shared clipboard, in a platform-neutral form: a kind, a MIME
+/// type, and raw bytes (plus a suggested filename for files/images). Every
+/// platform maps these to and from its own clipboard — macOS NSPasteboard, iOS
+/// UIPasteboard, and (later) the Windows clipboard — so nothing on the wire is
+/// tied to one OS's pasteboard flavors. Text is UTF-8 and images use a standard
+/// web image type (PNG or JPEG), so any client can consume them.
+public struct ClipboardItem: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable { case text, image, file }
+    public var kind: Kind
+    /// MIME type, e.g. "text/plain", "image/png", "application/pdf",
+    /// "application/octet-stream". Advisory; `kind` drives handling.
+    public var mimeType: String
+    /// Suggested filename for file/image items (e.g. "photo.png"); nil for text.
+    public var name: String?
+    public var data: Data
+
+    public init(kind: Kind, mimeType: String, name: String? = nil, data: Data) {
+        self.kind = kind
+        self.mimeType = mimeType
+        self.name = name
+        self.data = data
+    }
+
+    /// A UTF-8 text item.
+    public static func text(_ string: String) -> ClipboardItem {
+        ClipboardItem(kind: .text, mimeType: "text/plain", data: Data(string.utf8))
+    }
+
+    /// Decoded text, if this is a text item.
+    public var text: String? {
+        guard kind == .text else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
+/// A clipboard snapshot: zero or more items (a single copy can carry several
+/// representations, e.g. text plus an image). Receivers take what they can use.
+public struct ClipboardContent: Codable, Sendable, Equatable {
+    public var items: [ClipboardItem]
+    public init(items: [ClipboardItem] = []) { self.items = items }
+
+    public var isEmpty: Bool { items.isEmpty }
+    /// First plain-text representation, if any.
+    public var text: String? { items.first(where: { $0.kind == .text })?.text }
+}
+
 // MARK: Envelope
 
 public enum ControlMessage: Codable, Sendable, Equatable {
@@ -266,6 +314,13 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// Client triggers a menu item, addressed by child indexes from the root
     /// of `menuTree` (e.g. [2, 5, 1] = third menu → its 6th item → its 2nd item).
     case menuAction(path: [Int])
+    /// Either side asks the other for its current clipboard; the peer replies
+    /// with `clipboard`. Used to pull the Mac's clipboard onto the device.
+    case requestClipboard
+    /// A clipboard snapshot pushed to the peer (a reply to `requestClipboard`,
+    /// or an unsolicited push to set the peer's clipboard). Symmetric in both
+    /// directions so any platform's client and server share the same code path.
+    case clipboard(ClipboardContent)
 }
 
 // MARK: - Video frames (binary, kind = .videoFrame)

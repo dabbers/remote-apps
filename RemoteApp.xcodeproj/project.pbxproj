@@ -19,6 +19,7 @@
 		3F146C285ADE0524E402A910 /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE167BA201EC33D48EFFFAC1 /* Discovery.swift */; };
 		553A41A689B05077D3C19091 /* ClientSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45E2D57C2AFF812C8937EF33 /* ClientSession.swift */; };
 		6307940A8929F72F661D4C5B /* Auth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31EF490DB10514E76D81AB02 /* Auth.swift */; };
+		640FDF488D2A38C3DBF8A257 /* ClipboardBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14C61260C315DD1D949CA773 /* ClipboardBridge.swift */; };
 		670AF71256A39B03C7B54D5D /* RemoteAppProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 23D8DE8882C798B9BE8E344A /* RemoteAppProtocol */; };
 		91F1ECD8C8C9241E16795CA9 /* InputInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */; };
 		9A04859A566568B285AD129C /* MacMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419C26293F5A9A3A987E7CA7 /* MacMenu.swift */; };
@@ -26,6 +27,7 @@
 		BB5ADF4616DF85D1A646CD81 /* TailscaleInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */; };
 		C88187C57C6208EE9DCC7F5C /* WindowCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E6E8C4E48222FDC6CA707C5 /* WindowCapture.swift */; };
 		CF8A6B9E9E49B47D0BAE6F98 /* RemoteAppClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 231C7B8E91B769B8EA888D16 /* RemoteAppClientApp.swift */; };
+		E50A505A71FB5DEC792C2AFE /* Clipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0522F9F8857D9F6490A3BC1 /* Clipboard.swift */; };
 		F3144C04A412003E79AD75C6 /* ServerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3508150C28D206C7B9CDFDEB /* ServerModel.swift */; };
 		F4E5475F9B4795DCFDA76B5F /* RemoteAppProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A5AD455F9F0B97FD6476A14B /* RemoteAppProtocol */; };
 		F5993C8EE4676D20A95EAB4C /* ClientModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E583EA1846D8A25FCB26247D /* ClientModel.swift */; };
@@ -35,6 +37,7 @@
 
 /* Begin PBXFileReference section */
 		04C0FE307956BA4D39A3D7AC /* server.p12 */ = {isa = PBXFileReference; path = server.p12; sourceTree = "<group>"; };
+		14C61260C315DD1D949CA773 /* ClipboardBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardBridge.swift; sourceTree = "<group>"; };
 		1B98A4ECDEDB91F689782191 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
 		231C7B8E91B769B8EA888D16 /* RemoteAppClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAppClientApp.swift; sourceTree = "<group>"; };
 		31EF490DB10514E76D81AB02 /* Auth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Auth.swift; sourceTree = "<group>"; };
@@ -48,6 +51,7 @@
 		7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputInjector.swift; sourceTree = "<group>"; };
 		83AEF0BAE7048C52AFBC2D8C /* ShareableApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareableApps.swift; sourceTree = "<group>"; };
 		9C8C2DC29DAF963F2CD0689C /* LaunchableApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchableApps.swift; sourceTree = "<group>"; };
+		A0522F9F8857D9F6490A3BC1 /* Clipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Clipboard.swift; sourceTree = "<group>"; };
 		A7E18DD6AA348A244BA4779B /* RemoteAppClient.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RemoteAppClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailscaleInfo.swift; sourceTree = "<group>"; };
 		AE167BA201EC33D48EFFFAC1 /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
@@ -129,6 +133,7 @@
 			isa = PBXGroup;
 			children = (
 				E583EA1846D8A25FCB26247D /* ClientModel.swift */,
+				A0522F9F8857D9F6490A3BC1 /* Clipboard.swift */,
 				AE167BA201EC33D48EFFFAC1 /* Discovery.swift */,
 				419C26293F5A9A3A987E7CA7 /* MacMenu.swift */,
 				231C7B8E91B769B8EA888D16 /* RemoteAppClientApp.swift */,
@@ -144,6 +149,7 @@
 			children = (
 				31EF490DB10514E76D81AB02 /* Auth.swift */,
 				45E2D57C2AFF812C8937EF33 /* ClientSession.swift */,
+				14C61260C315DD1D949CA773 /* ClipboardBridge.swift */,
 				E2664C6C345B0B78205068A5 /* ContentView.swift */,
 				37756DA6723350EA2607DF31 /* H264Encoder.swift */,
 				7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */,
@@ -270,6 +276,7 @@
 			files = (
 				6307940A8929F72F661D4C5B /* Auth.swift in Sources */,
 				553A41A689B05077D3C19091 /* ClientSession.swift in Sources */,
+				640FDF488D2A38C3DBF8A257 /* ClipboardBridge.swift in Sources */,
 				33E84B19E080AF59553E4272 /* ContentView.swift in Sources */,
 				12F06D857A2A364E7A881428 /* H264Encoder.swift in Sources */,
 				91F1ECD8C8C9241E16795CA9 /* InputInjector.swift in Sources */,
@@ -290,6 +297,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F5993C8EE4676D20A95EAB4C /* ClientModel.swift in Sources */,
+				E50A505A71FB5DEC792C2AFE /* Clipboard.swift in Sources */,
 				3F146C285ADE0524E402A910 /* Discovery.swift in Sources */,
 				9A04859A566568B285AD129C /* MacMenu.swift in Sources */,
 				CF8A6B9E9E49B47D0BAE6F98 /* RemoteAppClientApp.swift in Sources */,

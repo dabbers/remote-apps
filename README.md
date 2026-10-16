@@ -33,6 +33,8 @@ Scripts/gen-cert.sh  regenerates the self-signed dev TLS identity (Server/Resour
 | Encode/decode | `VTCompressionSession`, H.264 High, real-time, no B-frames, 60 fps, 12 Mbit/s | `AVSampleBufferDisplayLayer` (VideoToolbox decode) fed AVCC access units |
 | Input | `CGEvent.postToPid` on the app's PID: the host cursor does not move | Tap = click (double-click by timing), one-finger pan = scroll, long press = right click, keyboard = key events, two-finger tap = toggle HUD |
 | Menu bar | Read through the Accessibility API (`AXMenuBar` → `AXMenuBarItem` → `AXMenu` → `AXMenuItem`), with titles, enabled/checked state and shortcut hints; items performed with `AXPress` | iPhone/iPad: native menu sheet from the HUD. **Mac: the streamed app's menus appear in the real Mac menu bar**, plus a "Remote" menu to manage the session |
+| Keyboard | Virtual key codes and modifier flags posted as `CGEvent`s; a `⌘`/`⌃`+character is posted by its US-layout key code so menu shortcuts (Copy, Paste…) fire | Software keyboard plus an **accessory bar**: Esc, Tab, arrows, and sticky `⌃⌥⇧⌘` modifiers that arm for the next key (`⌘` then `c` = ⌘C) |
+| Clipboard | **Shared both ways** via `NSPasteboard`, in a platform-neutral form: text as UTF-8, images as PNG/JPEG, files written to `~/Downloads/RemoteApp` and put on the pasteboard | HUD → clipboard: pull the Mac's clipboard (text/images paste-ready), or push this device's clipboard, picked **Photos**, or **Files**; received files/photos saved via the share sheet |
 
 Wire format: `u32 length | u8 kind | payload`; kind 1 is a JSON `ControlMessage`,
 kind 2 is a binary video frame (`pts`, capture wall-clock time, keyframe flag,
