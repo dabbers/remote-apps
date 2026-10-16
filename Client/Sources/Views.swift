@@ -152,6 +152,7 @@ struct AppListView: View {
 
 struct StreamingScreen: View {
     @EnvironmentObject var model: ClientModel
+    @State private var showingMenu = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -161,6 +162,10 @@ struct StreamingScreen: View {
             if model.hudVisible {
                 HStack(spacing: 12) {
                     Button { model.backToApps() } label: { Image(systemName: "chevron.left") }
+                    Button {
+                        model.requestMenu()
+                        showingMenu = true
+                    } label: { Image(systemName: "menubar.rectangle") }
                     Button { model.keyboardVisible.toggle() } label: {
                         Image(systemName: model.keyboardVisible ? "keyboard.chevron.compact.down" : "keyboard")
                     }
@@ -192,5 +197,88 @@ struct StreamingScreen: View {
         .animation(.easeInOut(duration: 0.2), value: model.hudVisible)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
+        .sheet(isPresented: $showingMenu) {
+            MenuSheet(onAct: { path in
+                model.performMenu(path: path)
+                showingMenu = false
+            }, onRefresh: { model.requestMenu() })
+            .environmentObject(model)
+        }
+    }
+}
+
+/// Native rendering of the host app's menu bar (read via Accessibility).
+struct MenuSheet: View {
+    @EnvironmentObject var model: ClientModel
+    @Environment(\.dismiss) private var dismiss
+    let onAct: ([Int]) -> Void
+    let onRefresh: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if model.menu.isEmpty {
+                    ContentUnavailableView("No menu", systemImage: "menubar.rectangle",
+                                           description: Text("The app reported no menu bar, or Accessibility is not granted."))
+                } else {
+                    MenuLevel(nodes: model.menu, prefix: [], onAct: onAct)
+                }
+            }
+            .navigationTitle("Menu")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) { Button { onRefresh() } label: { Image(systemName: "arrow.clockwise") } }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// One level of the menu hierarchy; submenus push a deeper level.
+struct MenuLevel: View {
+    let nodes: [MenuNode]
+    let prefix: [Int]
+    let onAct: ([Int]) -> Void
+
+    var body: some View {
+        List {
+            ForEach(Array(nodes.enumerated()), id: \.offset) { index, node in
+                let path = prefix + [index]
+                if node.isSeparator {
+                    Divider()
+                } else if node.hasSubmenu {
+                    NavigationLink {
+                        MenuLevel(nodes: node.children, prefix: path, onAct: onAct)
+                            .navigationTitle(node.title)
+                            .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        row(node)
+                    }
+                    .disabled(!node.enabled)
+                } else {
+                    Button { onAct(path) } label: { row(node) }
+                        .disabled(!node.enabled)
+                }
+            }
+        }
+        .listStyle(.plain)
+    }
+
+    private func row(_ node: MenuNode) -> some View {
+        HStack {
+            Image(systemName: "checkmark")
+                .opacity(node.checked ? 1 : 0)
+                .font(.caption)
+                .frame(width: 14)
+            Text(node.title)
+                .foregroundStyle(node.enabled ? .primary : .secondary)
+            Spacer()
+            if let shortcut = node.shortcut {
+                Text(shortcut)
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }

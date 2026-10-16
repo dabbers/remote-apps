@@ -132,10 +132,37 @@ final class ClientSession {
             Task { await self.applyClientSize() }
         case .input(let event):
             injector?.handle(event)
+        case .requestMenu:
+            sendMenu()
+        case .menuAction(let path):
+            performMenuAction(path: path)
         case .ping(let n):
             send(.pong(n))
         default:
             break
+        }
+    }
+
+    // MARK: Menu bar
+
+    private func sendMenu() {
+        guard let pid = currentPID else { return }
+        // AX reads can block briefly; keep them off the connection queue.
+        pipelineQueue.async { [weak self] in
+            let tree = MenuReader.read(pid: pid)
+            self?.send(.menuTree(tree))
+        }
+    }
+
+    private func performMenuAction(path: [Int]) {
+        guard let pid = currentPID else { return }
+        pipelineQueue.async { [weak self] in
+            let ok = MenuReader.perform(pid: pid, path: path)
+            self?.onLog?("menu action \(path) \(ok ? "performed" : "failed")")
+            // Resend the tree so checkmarks / enabled state update after the action.
+            self?.pipelineQueue.asyncAfter(deadline: .now() + 0.15) {
+                self?.send(.menuTree(MenuReader.read(pid: pid)))
+            }
         }
     }
 
@@ -195,6 +222,7 @@ final class ClientSession {
             injector = InputInjector(pid: pid, windowFrame: frame)
             try startPipeline(app: scApp, display: display, frame: frame)
             sendGeometry()
+            sendMenu()
             startGeometryTimer()
         } catch {
             log("select failed: \(error)")

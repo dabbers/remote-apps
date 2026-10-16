@@ -24,6 +24,7 @@ final class ClientModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var keyboardVisible = false
     @Published var hudVisible = true
+    @Published var menu: [MenuNode] = []
 
     let renderer = VideoRenderer()
     /// Full-screen drawable size in points. Read lazily: at app init the
@@ -201,6 +202,7 @@ final class ClientModel: ObservableObject {
     func select(_ app: AppInfo) {
         renderer.reset()
         geometry = nil
+        menu = []
         latencyEMA = nil
         connection?.send(.selectApp(SelectApp(pid: app.pid)))
         phase = .streaming
@@ -214,6 +216,12 @@ final class ClientModel: ObservableObject {
     func send(_ event: InputEvent) {
         connection?.send(.input(event))
     }
+
+    // MARK: Menu bar
+
+    func requestMenu() { connection?.send(.requestMenu) }
+
+    func performMenu(path: [Int]) { connection?.send(.menuAction(path: path)) }
 
     // MARK: Incoming
 
@@ -233,6 +241,8 @@ final class ClientModel: ObservableObject {
             geometry = g
         case .videoConfig(let config):
             renderer.apply(config)
+        case .menuTree(let tree):
+            menu = tree
         case .error(let message):
             errorMessage = message
         case .ping(let n):

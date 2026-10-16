@@ -27,6 +27,7 @@
 		F4E5475F9B4795DCFDA76B5F /* RemoteAppProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A5AD455F9F0B97FD6476A14B /* RemoteAppProtocol */; };
 		F5993C8EE4676D20A95EAB4C /* ClientModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E583EA1846D8A25FCB26247D /* ClientModel.swift */; };
 		FC4450BE7E0B9CC6F6AF22FE /* StreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18F8002C07509952FC839A0 /* StreamView.swift */; };
+		FE23689877502420CE624FEB /* MenuReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79931C7387E1C6E61CD94836 /* MenuReader.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +40,7 @@
 		37756DA6723350EA2607DF31 /* H264Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = H264Encoder.swift; sourceTree = "<group>"; };
 		3E6E8C4E48222FDC6CA707C5 /* WindowCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowCapture.swift; sourceTree = "<group>"; };
 		45E2D57C2AFF812C8937EF33 /* ClientSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientSession.swift; sourceTree = "<group>"; };
+		79931C7387E1C6E61CD94836 /* MenuReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuReader.swift; sourceTree = "<group>"; };
 		7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputInjector.swift; sourceTree = "<group>"; };
 		83AEF0BAE7048C52AFBC2D8C /* ShareableApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareableApps.swift; sourceTree = "<group>"; };
 		A7E18DD6AA348A244BA4779B /* RemoteAppClient.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RemoteAppClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -138,6 +140,7 @@
 				E2664C6C345B0B78205068A5 /* ContentView.swift */,
 				37756DA6723350EA2607DF31 /* H264Encoder.swift */,
 				7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */,
+				79931C7387E1C6E61CD94836 /* MenuReader.swift */,
 				ECA57E4AC9F89F6BD35826EA /* RemoteAppServerApp.swift */,
 				3508150C28D206C7B9CDFDEB /* ServerModel.swift */,
 				83AEF0BAE7048C52AFBC2D8C /* ShareableApps.swift */,
@@ -261,6 +264,7 @@
 				33E84B19E080AF59553E4272 /* ContentView.swift in Sources */,
 				12F06D857A2A364E7A881428 /* H264Encoder.swift in Sources */,
 				91F1ECD8C8C9241E16795CA9 /* InputInjector.swift in Sources */,
+				FE23689877502420CE624FEB /* MenuReader.swift in Sources */,
 				16AA075C8E7B35C7A03ACCFF /* RemoteAppServerApp.swift in Sources */,
 				F3144C04A412003E79AD75C6 /* ServerModel.swift in Sources */,
 				0ED488BAA9FB40E547BA6A95 /* ShareableApps.swift in Sources */,

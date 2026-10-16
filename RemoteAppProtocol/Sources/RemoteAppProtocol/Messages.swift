@@ -181,6 +181,33 @@ public enum InputEvent: Codable, Sendable, Equatable {
     case key(KeyEvent)
 }
 
+// MARK: Menu bar
+
+/// One node of the streamed app's menu bar, read through the Accessibility API
+/// (not captured as pixels), so the client can render it as a native iOS menu.
+public struct MenuNode: Codable, Sendable, Equatable {
+    public var title: String
+    public var enabled: Bool
+    public var isSeparator: Bool
+    /// True when the item shows a checkmark (or mixed-state mark).
+    public var checked: Bool
+    /// Display hint for the keyboard shortcut, e.g. "⌘B" or "⇧⌘S"; nil if none.
+    public var shortcut: String?
+    public var children: [MenuNode]
+
+    public init(title: String, enabled: Bool = true, isSeparator: Bool = false,
+                checked: Bool = false, shortcut: String? = nil, children: [MenuNode] = []) {
+        self.title = title
+        self.enabled = enabled
+        self.isSeparator = isSeparator
+        self.checked = checked
+        self.shortcut = shortcut
+        self.children = children
+    }
+
+    public var hasSubmenu: Bool { !children.isEmpty }
+}
+
 // MARK: Envelope
 
 public enum ControlMessage: Codable, Sendable, Equatable {
@@ -197,6 +224,13 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case error(message: String)
     case ping(UInt64)
     case pong(UInt64)
+    /// Client asks the server to (re-)read and send the menu bar.
+    case requestMenu
+    /// Server's current menu bar: top-level menus (the Apple menu is omitted).
+    case menuTree([MenuNode])
+    /// Client triggers a menu item, addressed by child indexes from the root
+    /// of `menuTree` (e.g. [2, 5, 1] = third menu → its 6th item → its 2nd item).
+    case menuAction(path: [Int])
 }
 
 // MARK: - Video frames (binary, kind = .videoFrame)
