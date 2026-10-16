@@ -25,7 +25,7 @@ Scripts/gen-cert.sh  regenerates the self-signed dev TLS identity (Server/Resour
 | Discovery | Reads its tailnet identity from the Tailscale local API (`tailscale status --json`); shows its MagicDNS name as the connect target. Bonjour stays as an optional LAN fallback | Connect by MagicDNS name / tailnet IP; Bonjour list is a fallback |
 | Binding | Listeners scoped (`IP_BOUND_IF`) to the Tailscale interface (`utun*:53123`) and loopback (`lo0:53124`) only, never a public interface | — |
 | Transport | TLS 1.3 over TCP over the WireGuard tunnel (default), with a bundled self-signed identity; QUIC selectable for LAN | Trusts any server certificate (fine: WireGuard already encrypts and authenticates the tailnet) |
-| Auth | 6-digit pairing code shown in the server window | Entered after choosing a Mac |
+| Auth | 6-digit pairing code shown in the server window; the device is then remembered with a persistent token | Enter the code once per device; later connects skip it |
 | App list | `SCShareableContent` → apps with normal on-screen windows, with icons | List with icons |
 | Window sizing | Accessibility API moves/resizes the app's main window to the phone's point size, then reports what the app accepted | Letterboxes (`resizeAspect`) when the app clamped; pinch to zoom |
 | Capture | `SCContentFilter(display:including:[app])` cropped with `sourceRect` to the main window: menus, sheets and popovers of that app are included, other apps are not | — |
