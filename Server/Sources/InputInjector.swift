@@ -24,23 +24,22 @@ final class InputInjector {
         self.windowFrame = windowFrame
     }
 
+    var onLog: ((String) -> Void)?
+
     /// Events are posted to the app's PID, but an inactive window absorbs the
     /// first click (and ignores keystrokes) just to become key. So bring the app
     /// to the front first whenever it is not already active. Throttled so a burst
     /// of events does not hammer activation.
     private func ensureActive() {
         guard Date().timeIntervalSince(lastActivate) > 0.3 else { return }
-        var activated = false
-        DispatchQueue.main.sync {
-            if let app = NSRunningApplication(processIdentifier: pid), !app.isActive {
-                app.activate()
-                activated = true
-            }
+        guard !WindowControl.isFrontmost(pid: pid) else { return }
+        lastActivate = Date()
+        WindowControl.activate(pid: pid)                       // AX frontmost (works from background)
+        DispatchQueue.main.async { [pid] in
+            NSRunningApplication(processIdentifier: pid)?.activate()   // best-effort backup
         }
-        if activated {
-            lastActivate = Date()
-            usleep(90_000)   // give the window server time to make it key
-        }
+        usleep(120_000)   // let the window server make it key
+        onLog?("activated app \(pid) for input (was not frontmost)")
     }
 
     func handle(_ event: InputEvent) {

@@ -220,6 +220,7 @@ final class ClientSession {
             currentPID = pid
             restartAttempts = 0
             injector = InputInjector(pid: pid, windowFrame: frame)
+            injector?.onLog = { [weak self] line in self?.onLog?(line) }
             try startPipeline(app: scApp, display: display, frame: frame)
             sendGeometry()
             sendMenu()

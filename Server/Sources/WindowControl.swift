@@ -25,6 +25,25 @@ enum WindowControl {
         return nil
     }
 
+    /// Brings the app to the front through the Accessibility API. Unlike
+    /// `NSRunningApplication.activate()`, which macOS ignores when the caller is
+    /// not itself the active app, setting `AXFrontmost` works from our
+    /// (Accessibility-trusted) background server, which is what lets injected
+    /// clicks reach controls instead of just waking an inactive window.
+    static func activate(pid: pid_t) {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        if let window = mainWindow(pid: pid) {
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        }
+    }
+
+    static func isFrontmost(pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        return (copyAttribute(app, kAXFrontmostAttribute) as? Bool) ?? false
+    }
+
     static func frame(of window: AXUIElement) -> CGRect? {
         guard let posValue = copyAttribute(window, kAXPositionAttribute),
               let sizeValue = copyAttribute(window, kAXSizeAttribute) else { return nil }
