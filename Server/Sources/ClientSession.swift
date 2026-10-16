@@ -40,6 +40,12 @@ final class ClientSession {
     private var geometryTimer: DispatchSourceTimer?
     private let pipelineQueue = DispatchQueue(label: "remoteapp.pipeline", qos: .userInteractive)
 
+    /// The app currently being streamed, and capture-restart bookkeeping.
+    private var currentPID: pid_t?
+    private var isRestarting = false
+    private var restartAttempts = 0
+    private let maxRestartAttempts = 12
+
     private var inFlight = 0
     private let maxInFlight = 4
     private var statFrames = 0
@@ -184,6 +190,8 @@ final class ClientSession {
             self.display = display
             scale = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == display.displayID }?.backingScaleFactor ?? 2
 
+            currentPID = pid
+            restartAttempts = 0
             injector = InputInjector(pid: pid, windowFrame: frame)
             try startPipeline(app: scApp, display: display, frame: frame)
             sendGeometry()
@@ -219,8 +227,12 @@ final class ClientSession {
             }
         }
         capture.onError = { [weak self] error in
-            self?.log("capture stopped: \(error)")
-            self?.send(.error(message: "capture stopped: \(error.localizedDescription)"))
+            // ScreenCaptureKit stops the stream on transient conditions — the
+            // host display sleeping, the window briefly vanishing during a
+            // resize, a display reconfiguration. Rebuild the pipeline instead of
+            // giving up, so the stream self-heals without the client re-selecting.
+            self?.log("capture stopped: \(error.localizedDescription); restarting")
+            self?.scheduleRestart()
         }
         self.capture = capture
         statStart = Date()
@@ -279,7 +291,67 @@ final class ClientSession {
         geometryTimer = timer
     }
 
+    // MARK: Capture auto-restart
+
+    private func scheduleRestart() {
+        pipelineQueue.async { [weak self] in
+            guard let self, self.currentPID != nil, !self.isRestarting else { return }
+            self.isRestarting = true
+            self.restartAttempts += 1
+            let attempt = self.restartAttempts
+            // Back off a little between tries; a sleeping display can take a
+            // few seconds to come back.
+            let delay = min(0.5 * Double(attempt), 3.0)
+            self.pipelineQueue.asyncAfter(deadline: .now() + delay) {
+                Task { await self.restartCapture() }
+            }
+        }
+    }
+
+    private func restartCapture() async {
+        guard let pid = currentPID else { isRestarting = false; return }
+        let old = capture
+        capture = nil
+        await old?.stop()
+        encoder?.invalidate()
+        encoder = nil
+        do {
+            let snapshot = try await ShareableApps.fetch()
+            guard let scApp = snapshot.content.applications.first(where: { $0.processID == pid }) else {
+                throw NSError(domain: "RemoteApp", code: 1, userInfo: [NSLocalizedDescriptionKey: "app no longer running"])
+            }
+            guard let axWindow = WindowControl.mainWindow(pid: pid),
+                  let frame = WindowControl.frame(of: axWindow) else {
+                throw NSError(domain: "RemoteApp", code: 2, userInfo: [NSLocalizedDescriptionKey: "window not found"])
+            }
+            window = axWindow
+            windowFrame = frame
+            injector?.windowFrame = frame
+            let display = self.display
+                ?? snapshot.content.displays.first(where: { $0.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) })
+                ?? snapshot.content.displays.first
+            guard let display else { throw NSError(domain: "RemoteApp", code: 3, userInfo: [NSLocalizedDescriptionKey: "no display"]) }
+            self.display = display
+            try startPipeline(app: scApp, display: display, frame: frame)
+            sendGeometry()
+            isRestarting = false
+            restartAttempts = 0
+            log("capture restarted")
+        } catch {
+            isRestarting = false
+            if restartAttempts < maxRestartAttempts {
+                scheduleRestart()
+            } else {
+                restartAttempts = 0
+                log("giving up restart: \(error.localizedDescription)")
+                send(.error(message: "capture stopped and could not be restarted: \(error.localizedDescription)"))
+            }
+        }
+    }
+
     private func refreshGeometry() async {
+        // Don't fight an in-progress restart.
+        guard !isRestarting else { return }
         guard let window, let display, let capture, let frame = WindowControl.frame(of: window) else { return }
         guard frame != windowFrame else { return }
         let sizeChanged = frame.size != windowFrame.size
@@ -301,6 +373,9 @@ final class ClientSession {
     private func teardown() {
         geometryTimer?.cancel()
         geometryTimer = nil
+        currentPID = nil
+        isRestarting = false
+        restartAttempts = 0
         let capture = self.capture
         self.capture = nil
         Task { await capture?.stop() }
