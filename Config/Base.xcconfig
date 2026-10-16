@@ -1,0 +1,16 @@
+// Committed defaults so the project builds with no Apple Developer account:
+// ad-hoc signing, and a neutral bundle-id prefix. These produce a build that
+// runs locally but cannot be installed on a physical device.
+//
+// To sign with your own team (needed for a device build, and so the server's
+// Screen Recording / Accessibility grants persist across rebuilds), copy
+// Config/Local.xcconfig.example to Config/Local.xcconfig and fill it in. That
+// file is gitignored and overrides the values below.
+
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+REMOTEAPP_BUNDLE_PREFIX = io.github.dabbers.remoteapps
+
+#include? "Local.xcconfig"

@@ -1,0 +1,15 @@
+// Copy this file to Config/Local.xcconfig (which is gitignored) and fill in
+// your Apple Developer team to sign the apps with your own identity. This is
+// required to install the client on a physical iPhone/iPad, and it keeps the
+// server's Screen Recording / Accessibility grants across rebuilds (ad-hoc
+// signing resets them every build).
+//
+// Find your team ID in Xcode ▸ Settings ▸ Accounts, or at
+// developer.apple.com/account (Membership details).
+
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+
+// You can also override the bundle-id prefix to one tied to your team:
+// REMOTEAPP_BUNDLE_PREFIX = com.example.remoteapps

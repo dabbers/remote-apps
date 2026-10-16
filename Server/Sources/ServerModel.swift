@@ -67,16 +67,12 @@ final class ServerModel: ObservableObject {
             tailnetWarning = nil
         }
 
-        guard let url = Bundle.main.url(forResource: "server", withExtension: "p12") else {
-            append("server.p12 missing; run Scripts/gen-cert.sh")
-            listenerState = "failed"
-            return
-        }
         let identity: SecIdentity
         do {
-            identity = try Transport.loadIdentity(p12: try Data(contentsOf: url), passphrase: "remoteapp")
+            // Generated into Application Support on first launch; nothing bundled.
+            identity = try ServerIdentity.loadOrCreate()
         } catch {
-            append("identity load failed: \(error.localizedDescription)")
+            append("TLS identity unavailable: \(error.localizedDescription)")
             listenerState = "failed"
             return
         }

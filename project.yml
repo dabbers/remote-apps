@@ -1,21 +1,20 @@
 name: RemoteApp
 options:
-  bundleIdPrefix: io.github.dabbers.remoteapps
   deploymentTarget:
     macOS: "14.0"
     iOS: "17.0"
   createIntermediateGroups: true
   generateEmptyDirectories: true
+# Signing and the bundle-id prefix come from Config/Base.xcconfig, which pulls in
+# a gitignored Config/Local.xcconfig for per-machine overrides (see
+# Config/Local.xcconfig.example). Nothing machine-specific lives in this file.
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
-    # Ad-hoc signing so the project builds without an Apple Developer account.
-    # To use a real identity, set DEVELOPMENT_TEAM and CODE_SIGN_STYLE: Automatic
-    # (a stable identity keeps Screen Recording / Accessibility grants across rebuilds).
-    CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: "-"
-    DEVELOPMENT_TEAM: ""
 packages:
   RemoteAppProtocol:
     path: RemoteAppProtocol
@@ -25,8 +24,6 @@ targets:
     platform: macOS
     sources:
       - path: Server/Sources
-      - path: Server/Resources
-        buildPhase: resources
     dependencies:
       - package: RemoteAppProtocol
     entitlements:
@@ -35,7 +32,7 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Server/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.dabbers.remoteapps.server
+        PRODUCT_BUNDLE_IDENTIFIER: $(REMOTEAPP_BUNDLE_PREFIX).server
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO
         MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -54,12 +51,10 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Client/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.dabbers.remoteapps.client
+        PRODUCT_BUNDLE_IDENTIFIER: $(REMOTEAPP_BUNDLE_PREFIX).client
         # iPhone + iPad; Mac Catalyst builds a native-feeling Mac app.
         TARGETED_DEVICE_FAMILY: "1,2"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         SUPPORTS_MACCATALYST: YES
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
-        CODE_SIGN_IDENTITY[sdk=macosx*]: "Apple Development"
-        DEVELOPMENT_TEAM[sdk=macosx*]: "YOUR_TEAM_ID"

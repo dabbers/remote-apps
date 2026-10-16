@@ -23,7 +23,7 @@
 		670AF71256A39B03C7B54D5D /* RemoteAppProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 23D8DE8882C798B9BE8E344A /* RemoteAppProtocol */; };
 		91F1ECD8C8C9241E16795CA9 /* InputInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */; };
 		9A04859A566568B285AD129C /* MacMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419C26293F5A9A3A987E7CA7 /* MacMenu.swift */; };
-		B0D7129E394D44360EF0B261 /* server.p12 in Resources */ = {isa = PBXBuildFile; fileRef = 04C0FE307956BA4D39A3D7AC /* server.p12 */; };
+		AD49B9C7A3F6778081086F93 /* ServerIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F64067EFEB6492F985E5ECBB /* ServerIdentity.swift */; };
 		BB5ADF4616DF85D1A646CD81 /* TailscaleInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */; };
 		C88187C57C6208EE9DCC7F5C /* WindowCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E6E8C4E48222FDC6CA707C5 /* WindowCapture.swift */; };
 		CF8A6B9E9E49B47D0BAE6F98 /* RemoteAppClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 231C7B8E91B769B8EA888D16 /* RemoteAppClientApp.swift */; };
@@ -36,7 +36,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		04C0FE307956BA4D39A3D7AC /* server.p12 */ = {isa = PBXFileReference; path = server.p12; sourceTree = "<group>"; };
 		14C61260C315DD1D949CA773 /* ClipboardBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardBridge.swift; sourceTree = "<group>"; };
 		1B98A4ECDEDB91F689782191 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
 		231C7B8E91B769B8EA888D16 /* RemoteAppClientApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAppClientApp.swift; sourceTree = "<group>"; };
@@ -60,7 +59,9 @@
 		E583EA1846D8A25FCB26247D /* ClientModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientModel.swift; sourceTree = "<group>"; };
 		EBB3AFF61CBE4628DED780DC /* PairingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingStore.swift; sourceTree = "<group>"; };
 		ECA57E4AC9F89F6BD35826EA /* RemoteAppServerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAppServerApp.swift; sourceTree = "<group>"; };
+		EDA25B7B9CE345EBCE8920EA /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		F18F8002C07509952FC839A0 /* StreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamView.swift; sourceTree = "<group>"; };
+		F64067EFEB6492F985E5ECBB /* ServerIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerIdentity.swift; sourceTree = "<group>"; };
 		FD3E88CDFC2529945BF2F739 /* RemoteAppProtocol */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RemoteAppProtocol; path = RemoteAppProtocol; sourceTree = SOURCE_ROOT; };
 		FFF786761B415FD819DDC4BC /* WindowControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowControl.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -93,14 +94,6 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
-		2D34F9588183782182F1E4E9 /* Resources */ = {
-			isa = PBXGroup;
-			children = (
-				04C0FE307956BA4D39A3D7AC /* server.p12 */,
-			);
-			path = Resources;
-			sourceTree = "<group>";
-		};
 		4C7CFE23EB62ACD5A12E2E0D /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -110,10 +103,17 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		50284CACCD9A50C9E28C176E /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				EDA25B7B9CE345EBCE8920EA /* Base.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 		AD3104EAF7ACAB8E06A81445 /* Server */ = {
 			isa = PBXGroup;
 			children = (
-				2D34F9588183782182F1E4E9 /* Resources */,
 				BBC38C7212EF94CB17E77F96 /* Sources */,
 			);
 			path = Server;
@@ -123,6 +123,7 @@
 			isa = PBXGroup;
 			children = (
 				CCC261C24716B31455624ABE /* Client */,
+				50284CACCD9A50C9E28C176E /* Config */,
 				0980BAF862D1932D64560A02 /* Packages */,
 				AD3104EAF7ACAB8E06A81445 /* Server */,
 				4C7CFE23EB62ACD5A12E2E0D /* Products */,
@@ -157,6 +158,7 @@
 				79931C7387E1C6E61CD94836 /* MenuReader.swift */,
 				EBB3AFF61CBE4628DED780DC /* PairingStore.swift */,
 				ECA57E4AC9F89F6BD35826EA /* RemoteAppServerApp.swift */,
+				F64067EFEB6492F985E5ECBB /* ServerIdentity.swift */,
 				3508150C28D206C7B9CDFDEB /* ServerModel.swift */,
 				83AEF0BAE7048C52AFBC2D8C /* ShareableApps.swift */,
 				ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */,
@@ -201,7 +203,6 @@
 			buildConfigurationList = 2B42B31809B5DFD6E8139B63 /* Build configuration list for PBXNativeTarget "RemoteAppServer" */;
 			buildPhases = (
 				2A35D08DAD5709E3C97A29E5 /* Sources */,
-				A2A0154D83F0EF4C65E5704D /* Resources */,
 				6B5F99410D06976C4D3B015F /* Frameworks */,
 			);
 			buildRules = (
@@ -258,17 +259,6 @@
 		};
 /* End PBXProject section */
 
-/* Begin PBXResourcesBuildPhase section */
-		A2A0154D83F0EF4C65E5704D /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				B0D7129E394D44360EF0B261 /* server.p12 in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
-
 /* Begin PBXSourcesBuildPhase section */
 		2A35D08DAD5709E3C97A29E5 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -284,6 +274,7 @@
 				FE23689877502420CE624FEB /* MenuReader.swift in Sources */,
 				2F74280708A313195DE4B0BC /* PairingStore.swift in Sources */,
 				16AA075C8E7B35C7A03ACCFF /* RemoteAppServerApp.swift in Sources */,
+				AD49B9C7A3F6778081086F93 /* ServerIdentity.swift in Sources */,
 				F3144C04A412003E79AD75C6 /* ServerModel.swift in Sources */,
 				0ED488BAA9FB40E547BA6A95 /* ShareableApps.swift in Sources */,
 				BB5ADF4616DF85D1A646CD81 /* TailscaleInfo.swift in Sources */,
@@ -315,10 +306,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Client/RemoteAppClient.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = YOUR_TEAM_ID;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Client/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -327,7 +315,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.github.dabbers.remoteapps.client;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(REMOTEAPP_BUNDLE_PREFIX).client";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
@@ -352,7 +340,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.github.dabbers.remoteapps.server;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(REMOTEAPP_BUNDLE_PREFIX).server";
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -362,10 +350,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Client/RemoteAppClient.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
-				"DEVELOPMENT_TEAM[sdk=macosx*]" = YOUR_TEAM_ID;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Client/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -374,7 +359,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.github.dabbers.remoteapps.client;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(REMOTEAPP_BUNDLE_PREFIX).client";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = YES;
@@ -399,13 +384,14 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = io.github.dabbers.remoteapps.server;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(REMOTEAPP_BUNDLE_PREFIX).server";
 				SDKROOT = macosx;
 			};
 			name = Release;
 		};
 		C33FB6DEF4BEB5E2E09EDD92 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = EDA25B7B9CE345EBCE8920EA /* Base.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -437,11 +423,8 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -466,6 +449,7 @@
 		};
 		F1DB35C61420E302508857AC /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = EDA25B7B9CE345EBCE8920EA /* Base.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -497,11 +481,8 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;

@@ -15,8 +15,13 @@ RemoteAppProtocol/   Swift package shared by both apps: messages, framing, trans
 Server/              macOS SwiftUI app (RemoteAppServer)
 Client/              iOS SwiftUI app (RemoteAppClient)
 project.yml          xcodegen spec → RemoteApp.xcodeproj
-Scripts/gen-cert.sh  regenerates the self-signed dev TLS identity (Server/Resources/server.p12)
+Config/              build config: Base.xcconfig + Local.xcconfig.example (signing)
 ```
+
+**Nothing machine-specific is committed.** There is no bundled TLS key (the
+server generates a self-signed one on first launch), and no team ID, bundle
+prefix, tailnet name or developer identity in the tree — signing lives in a
+gitignored `Config/Local.xcconfig` (see [Running](#running)).
 
 ## How it works
 
@@ -24,7 +29,7 @@ Scripts/gen-cert.sh  regenerates the self-signed dev TLS identity (Server/Resour
 |---|---|---|
 | Discovery | Reads its tailnet identity from the Tailscale local API (`tailscale status --json`); shows its MagicDNS name as the connect target. Bonjour stays as an optional LAN fallback | Connect by MagicDNS name / tailnet IP; Bonjour list is a fallback |
 | Binding | Listeners scoped (`IP_BOUND_IF`) to the Tailscale interface (`utun*:53123`) and loopback (`lo0:53124`) only, never a public interface | — |
-| Transport | TLS 1.3 over TCP over the WireGuard tunnel (default), with a bundled self-signed identity; QUIC selectable for LAN | Trusts any server certificate (fine: WireGuard already encrypts and authenticates the tailnet) |
+| Transport | TLS 1.3 over TCP over the WireGuard tunnel (default), with a self-signed identity generated on first launch into Application Support; QUIC selectable for LAN | Trusts any server certificate (fine: WireGuard already encrypts and authenticates the tailnet) |
 | Auth | 6-digit pairing code shown in the server window; the device is then remembered with a persistent token | Enter the code once per device; later connects skip it |
 | App list | `SCShareableContent` → running apps with windows; plus all installed apps enumerated for launching | "Running" list, and a + button to open any installed app |
 | Launch | Opens an installed app via `NSWorkspace`, waits for its window, then streams it | Searchable installed-apps picker |
@@ -102,8 +107,17 @@ RemoteApp Server needs two grants in **System Settings › Privacy & Security**:
 The server asks for both on first launch. Toggle them on, then quit and relaunch
 the server. The project is **ad-hoc signed** by default (no developer account
 needed); macOS ties these grants to the code signature, so **each rebuild of the
-server requires re-granting**. To avoid that, set `DEVELOPMENT_TEAM` and
-`CODE_SIGN_STYLE: Automatic` in `project.yml` and regenerate.
+server requires re-granting**. To avoid that — and to install the client on a
+physical device — sign with your own team: copy `Config/Local.xcconfig.example`
+to `Config/Local.xcconfig` (gitignored), fill in your `DEVELOPMENT_TEAM`, and
+rebuild. A stable Development signature keeps the grants across rebuilds. You can
+also set `REMOTEAPP_BUNDLE_PREFIX` there to use your own bundle-id prefix.
+
+The TLS identity is **not committed**: on first launch the server generates a
+self-signed certificate into `~/Library/Application Support/RemoteAppServer/`
+(`server.p12`, mode 0600, with a per-install random passphrase beside it). It is
+used only over the tailnet, where WireGuard is the real trust boundary, so the
+client does not verify it.
 
 The client needs Local Network access (prompted on a real iPhone, not enforced in
 the simulator).

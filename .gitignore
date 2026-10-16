@@ -7,3 +7,9 @@ build/
 xcuserdata/
 .swiftpm/
 *.p12.tmp
+
+# Per-machine signing overrides and any key/cert material (never committed).
+Config/Local.xcconfig
+*.p12
+*.pem
+*.mobileprovision

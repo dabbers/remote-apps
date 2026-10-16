@@ -16,7 +16,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         let model = ClientModel.shared
 
         // Controls to manage the remote session, independent of the streamed app.
-        let remoteID = UIMenu.Identifier("io.github.dabbers.remoteapps.remote")
+        // Derive the menu identifier from the bundle ID so it carries no literal
+        // bundle prefix (which is configured, not hardcoded).
+        let remoteID = UIMenu.Identifier((Bundle.main.bundleIdentifier ?? "remoteapp") + ".remote")
         let remote = UIMenu(title: "Remote", identifier: remoteID, children: [
             UIKeyCommand(title: "Open an App…", action: #selector(remoteOpenApps),
                          input: "o", modifierFlags: [.command, .shift]),
