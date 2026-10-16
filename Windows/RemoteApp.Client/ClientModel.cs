@@ -48,7 +48,8 @@ public sealed class ClientModel
     /// <summary>The virtual window's drawable area, in points; sent in <c>hello</c> and on resize.</summary>
     public ScreenSize CurrentScreen { get; set; }
 
-    public double LatencyMs { get; private set; }
+    /// <summary>Smoothed capture → present latency; NaN until a comparable host timestamp arrives.</summary>
+    public double LatencyMs { get; private set; } = double.NaN;
     public double Fps { get; private set; }
 
     public event Action? PhaseChanged;
@@ -338,15 +339,17 @@ public sealed class ClientModel
     private int _frameCount;
     private long _windowStart = Environment.TickCount64;
 
+    /// <param name="latencyMs">Capture → present, or NaN when the host's clock cannot be compared with ours.</param>
     public void RecordFrame(double latencyMs)
     {
-        _latencyEma = _latencyEma is { } ema ? ema * 0.9 + latencyMs * 0.1 : latencyMs;
+        if (double.IsFinite(latencyMs))
+            _latencyEma = _latencyEma is { } ema ? ema * 0.9 + latencyMs * 0.1 : latencyMs;
         _frameCount++;
         var now = Environment.TickCount64;
         var elapsed = now - _windowStart;
         if (elapsed < 500) return;
         var fps = _frameCount * 1000.0 / elapsed;
-        var latency = _latencyEma ?? 0;
+        var latency = _latencyEma ?? double.NaN;
         _frameCount = 0;
         _windowStart = now;
         Post(() =>

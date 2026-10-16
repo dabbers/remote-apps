@@ -303,7 +303,11 @@ internal sealed unsafe class VideoPipeline : IDisposable
         }
 
         var nowMicros = (ulong)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000);
-        var latency = _currentCaptureWallMicros == 0 ? 0 : ((double)nowMicros - _currentCaptureWallMicros) / 1000.0;
+        // The host stamps frames with its own wall clock (PROTOCOL.md §7), so this
+        // only means something when the two clocks agree: a negative or absurd
+        // value is reported as unknown rather than shown.
+        var latency = _currentCaptureWallMicros == 0 ? double.NaN : ((double)nowMicros - _currentCaptureWallMicros) / 1000.0;
+        if (latency < 0 || latency > 10_000) latency = double.NaN;
         var clientMs = Stopwatch.GetElapsedTime(_currentReceivedTicks).TotalMilliseconds;
         _timedFrames++;
         _clientLatencySumMs += clientMs;
@@ -311,7 +315,7 @@ internal sealed unsafe class VideoPipeline : IDisposable
         FramePresented?.Invoke(latency);
         if (_presentedSinceConfig++ < 2)
             Info?.Invoke($"presented {frame.Width}×{frame.Height} ({(frame.IsGpu ? "GPU texture" : "CPU planes")}) into {_videoRect}, " +
-                         $"receive→present {clientMs:0.0} ms, capture→present {latency:0.0} ms");
+                         $"receive→present {clientMs:0.0} ms, capture→present {(double.IsNaN(latency) ? "n/a (clocks differ)" : $"{latency:0.0} ms")}");
     }
 
     private void PresentWithD2D(DecodedFrame frame)

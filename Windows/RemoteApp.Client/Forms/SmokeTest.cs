@@ -175,8 +175,11 @@ internal sealed class SmokeTest
                 break;
             case 4:
                 if (form == null) { Log("resize: no stream window"); break; }
-                Log($"resize: window client {form.ClientSize.Width}×{form.ClientSize.Height} → shrinking by 280×180 px");
-                form.ClientSize = new Size(form.ClientSize.Width - 280, form.ClientSize.Height - 180);
+                // A host app with a fixed-size window (Calculator) leaves the client
+                // small; never shrink below a usable size.
+                var shrunk = new Size(Math.Max(200, form.ClientSize.Width - 280), Math.Max(150, form.ClientSize.Height - 180));
+                Log($"resize: window client {form.ClientSize.Width}×{form.ClientSize.Height} → {shrunk.Width}×{shrunk.Height} px");
+                form.ClientSize = shrunk;
                 break;
             case 5:
                 if (Environment.GetEnvironmentVariable("REMOTEAPP_SMOKE_NO_CLIPBOARD") == "1") { Log("clipboard: skipped"); break; }
@@ -202,7 +205,8 @@ internal sealed class SmokeTest
         _finished = true;
         _timer.Stop();
         _steps.Stop();
-        Log($"finishing ({reason}): presented {_presentedFrames} frames, {_model.Fps:0.0} fps, {_model.LatencyMs:0.0} ms capture→present latency");
+        var latency = double.IsNaN(_model.LatencyMs) ? "n/a (host and client clocks differ)" : $"{_model.LatencyMs:0.0} ms";
+        Log($"finishing ({reason}): presented {_presentedFrames} frames, {_model.Fps:0.0} fps, capture→present latency {latency}");
         if (ExtraStats != null) Log("video stats: " + ExtraStats());
         try
         {

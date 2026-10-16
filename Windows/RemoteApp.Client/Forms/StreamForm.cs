@@ -183,11 +183,12 @@ internal sealed class StreamForm : Form
             return;
         }
 
-        // Never grow past the working area; the picture letterboxes instead.
+        // Never grow past the working area (the picture letterboxes instead), and
+        // keep a usable window even for a tiny host window.
         var workingArea = Screen.FromControl(this).WorkingArea;
         var frame = Size - ClientSize;
-        targetWidth = Math.Min(targetWidth, workingArea.Width - frame.Width);
-        targetHeight = Math.Min(targetHeight, workingArea.Height - frame.Height - ChromeHeight);
+        targetWidth = Math.Max(120, Math.Min(targetWidth, workingArea.Width - frame.Width));
+        targetHeight = Math.Max(80, Math.Min(targetHeight, workingArea.Height - frame.Height - ChromeHeight));
 
         _applyingGeometry = true;
         try
@@ -238,7 +239,8 @@ internal sealed class StreamForm : Form
     {
         var geometry = _model.Geometry;
         var size = geometry == null ? "" : $" · {geometry.Width:0}×{geometry.Height:0} pt ({geometry.PixelWidth}×{geometry.PixelHeight} px)";
-        _stats.Text = $"{_model.LatencyMs:0} ms · {_model.Fps:0} fps{size}";
+        var latency = double.IsNaN(_model.LatencyMs) ? "— ms" : $"{_model.LatencyMs:0} ms";
+        _stats.Text = $"{latency} · {_model.Fps:0} fps{size}";
     }
 
     public void ShowTransientStatus(string message)

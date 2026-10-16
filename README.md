@@ -321,6 +321,9 @@ share of one core:
   which classic Win32 controls take exactly but the WinUI Notepad flattens to
   the base letter (é → e); use the shared clipboard for such text.
 - TLS/TCP only (no QUIC), no Bonjour; connect by name or address.
+- The capture→present latency in the status bar compares the host's frame
+  timestamps with this PC's clock, so it shows "—" when the two clocks disagree
+  (e.g. a Mac host a second off); receive→present timing is unaffected.
 
 ## Next steps
 
