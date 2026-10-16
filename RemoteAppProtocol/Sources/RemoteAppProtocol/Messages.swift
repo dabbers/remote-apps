@@ -98,15 +98,46 @@ public struct AppInfo: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var windowCount: Int
     /// PNG-encoded icon, small (e.g. 64x64). Optional to keep the list light.
     public var iconPNG: Data?
+    /// True when a live session is already streaming this app (PROTOCOL.md §13),
+    /// so a client can show it as taken. Absent on the wire means `false`.
+    public var streamed: Bool
 
     public var id: Int32 { pid }
 
-    public init(pid: Int32, bundleIdentifier: String, name: String, windowCount: Int, iconPNG: Data? = nil) {
+    public init(pid: Int32, bundleIdentifier: String, name: String, windowCount: Int,
+                iconPNG: Data? = nil, streamed: Bool = false) {
         self.pid = pid
         self.bundleIdentifier = bundleIdentifier
         self.name = name
         self.windowCount = windowCount
         self.iconPNG = iconPNG
+        self.streamed = streamed
+    }
+
+    // Hand-written so `streamed` is optional on the wire (absent = false) and only
+    // emitted when true — older peers and lists without it still decode.
+    private enum CodingKeys: String, CodingKey {
+        case pid, bundleIdentifier, name, windowCount, iconPNG, streamed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pid = try c.decode(Int32.self, forKey: .pid)
+        bundleIdentifier = try c.decode(String.self, forKey: .bundleIdentifier)
+        name = try c.decode(String.self, forKey: .name)
+        windowCount = try c.decode(Int.self, forKey: .windowCount)
+        iconPNG = try c.decodeIfPresent(Data.self, forKey: .iconPNG)
+        streamed = try c.decodeIfPresent(Bool.self, forKey: .streamed) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(pid, forKey: .pid)
+        try c.encode(bundleIdentifier, forKey: .bundleIdentifier)
+        try c.encode(name, forKey: .name)
+        try c.encode(windowCount, forKey: .windowCount)
+        try c.encodeIfPresent(iconPNG, forKey: .iconPNG)
+        if streamed { try c.encode(true, forKey: .streamed) }
     }
 }
 

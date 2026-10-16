@@ -6,7 +6,7 @@ import XCTest
 
 final class FramingTests: XCTestCase {
     func testControlRoundTrip() throws {
-        let hello = ControlMessage.hello(Hello(clientName: "iPhone", credential: "123456", screen: ScreenSize(width: 402, height: 874, scale: 3)))
+        let hello = ControlMessage.hello(Hello(clientName: "iPhone", deviceID: "test-device", credential: "123456", screen: ScreenSize(width: 402, height: 874, scale: 3)))
         let input = ControlMessage.input(.scroll(at: NormalizedPoint(x: 0.5, y: 0.25), dx: 0, dy: -12.5))
         var parser = FrameParser()
         let bytes = try MessageCodec.encode(.control(hello)) + MessageCodec.encode(.control(input))

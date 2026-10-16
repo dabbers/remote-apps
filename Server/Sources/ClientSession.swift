@@ -8,6 +8,24 @@ import ScreenCaptureKit
 import CoreMedia
 import RemoteAppProtocol
 
+/// Server-wide coordinator (ServerModel) that lets several sessions from one
+/// device stream different apps at once without fighting over a window
+/// (PROTOCOL.md §13). Lives on the main actor; sessions call in from their own
+/// queues via `await`.
+@MainActor
+protocol SessionCoordinator: AnyObject {
+    /// pids streamed by *other* authenticated sessions right now.
+    func streamedPIDs(excluding sessionID: UUID) -> Set<pid_t>
+    /// Count of other authenticated sessions from the same device.
+    func authenticatedSessions(deviceID: String, excluding sessionID: UUID) -> Int
+    /// Record a session's device at auth and close sessions from a *different*
+    /// device (a new device takes over; the same device stacks).
+    func sessionDidAuthenticate(_ sessionID: UUID, deviceID: String)
+    /// A session started (`pid`) or stopped (`nil`) streaming; refresh the app
+    /// list on this device's other sessions so their `streamed` flags update.
+    func sessionStreaming(_ sessionID: UUID, deviceID: String, pid: pid_t?)
+}
+
 /// One connected client: auth, app selection, capture → encode → send, input.
 final class ClientSession {
     struct Stats {
@@ -22,6 +40,11 @@ final class ClientSession {
     var onStats: ((Stats) -> Void)?
     var onClose: (() -> Void)?
     var onAuthenticated: (() -> Void)?
+    /// Server-wide coordinator for concurrent sessions (PROTOCOL.md §13).
+    weak var coordinator: (any SessionCoordinator)?
+
+    /// The authenticated device's stable id (set at auth), for session grouping.
+    private(set) var deviceID = ""
 
     private let connection: MessageConnection
     private let authenticator: Authenticator
@@ -114,6 +137,7 @@ final class ClientSession {
             }
             // A remembered device skips the code.
             if let token = hello.token, pairingStore.isValid(deviceID: hello.deviceID, token: token) {
+                deviceID = hello.deviceID
                 isAuthenticated = true
                 onAuthenticated?()
                 clientScreen = hello.screen
@@ -126,6 +150,7 @@ final class ClientSession {
                 send(.authFailed(reason: "wrong pairing code"))
                 return
             }
+            deviceID = hello.deviceID
             isAuthenticated = true
             onAuthenticated?()
             clientScreen = hello.screen
@@ -196,15 +221,30 @@ final class ClientSession {
         }
     }
 
+    /// Re-send the running app list (used when another session on this device
+    /// starts or stops streaming, so `streamed` flags stay current).
+    func resendAppList() { Task { await self.sendAppList(asHelloAck: false) } }
+
+    /// Reject this session (e.g. over the per-device cap) and close it.
+    func reject(_ message: String) {
+        send(.error(message: message))
+        close()
+    }
+
     private func sendAppList(asHelloAck: Bool, issuedToken: String? = nil) async {
         do {
             let snapshot = try await ShareableApps.fetch()
+            // Mark apps another live session is already streaming (PROTOCOL.md §13).
+            let taken = await coordinator?.streamedPIDs(excluding: id) ?? []
+            let apps = snapshot.apps.map { app -> AppInfo in
+                var a = app; a.streamed = taken.contains(app.pid); return a
+            }
             if asHelloAck {
                 let hostScale = Double(NSScreen.main?.backingScaleFactor ?? 2)
-                send(.helloAck(HelloAck(serverName: serverName, hostScale: hostScale, apps: snapshot.apps, issuedToken: issuedToken,
-                                        features: ProtocolFeature.all)))
+                send(.helloAck(HelloAck(serverName: serverName, hostScale: hostScale, apps: apps, issuedToken: issuedToken,
+                                        features: ProtocolFeature.all + [ProtocolFeature.multiSession])))
             } else {
-                send(.appList(snapshot.apps))
+                send(.appList(apps))
             }
         } catch {
             log("shareable content failed: \(error)")
@@ -243,6 +283,14 @@ final class ClientSession {
     }
 
     private func selectApp(pid: pid_t) async {
+        // One session per app (PROTOCOL.md §13): refuse an app another live
+        // session is streaming and keep this session where it is, so two
+        // sessions never fight over moving/resizing the same window.
+        if await coordinator?.streamedPIDs(excluding: id).contains(pid) == true {
+            send(.error(message: "already streamed"))
+            log("refused app \(pid): already streamed by another session")
+            return
+        }
         teardown()
         do {
             let snapshot = try await ShareableApps.fetch()
@@ -284,6 +332,8 @@ final class ClientSession {
             sendGeometry()
             sendMenu()
             startGeometryTimer()
+            // Tell the coordinator so other sessions on this device see it taken.
+            await coordinator?.sessionStreaming(id, deviceID: deviceID, pid: pid)
         } catch {
             log("select failed: \(error)")
             send(.error(message: "capture failed: \(error.localizedDescription)"))

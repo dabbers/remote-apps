@@ -47,6 +47,12 @@ final class ServerModel: ObservableObject {
     private var pathMonitor: NWPathMonitor?
     private var listenersBuilt = false
 
+    // Multi-session (PROTOCOL.md §13): the device each authenticated session
+    // belongs to, and the app pid each streaming session currently holds.
+    private var deviceOf: [UUID: String] = [:]
+    private var streamingPID: [UUID: pid_t] = [:]
+    private let maxSessionsPerDevice = 8
+
     func refreshPermissions() {
         screenRecordingGranted = CGPreflightScreenCaptureAccess()
         accessibilityGranted = WindowControl.isTrusted
@@ -175,6 +181,8 @@ final class ServerModel: ObservableObject {
         listeners.removeAll()
         sessions.values.forEach { $0.close() }
         sessions.removeAll()
+        deviceOf.removeAll()
+        streamingPID.removeAll()
         boundEndpoints = []
         listenerState = "stopped"
     }
@@ -197,19 +205,35 @@ final class ServerModel: ObservableObject {
                 self?.append("client \(id.uuidString.prefix(4)): \(state)")
             }
         }
+        session.coordinator = self
         session.onAuthenticated = { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 self.refreshPairedCount()
-                for (otherId, other) in self.sessions where otherId != id && other.isAuthenticated { other.close() }
+                self.sessionDidAuthenticate(id, deviceID: session.deviceID)
+                // Per-device cap: refuse beyond the limit (PROTOCOL.md §13).
+                if self.authenticatedSessions(deviceID: session.deviceID, excluding: id) >= self.maxSessionsPerDevice {
+                    self.append("session cap (\(self.maxSessionsPerDevice)) reached for a device; refusing")
+                    session.reject("too many sessions from this device")
+                }
             }
         }
         session.onStats = { [weak self] stats in Task { @MainActor in self?.stats = stats } }
         session.onClose = { [weak self] in
             Task { @MainActor in
-                self?.sessions[id] = nil
-                self?.clientState = nil
-                self?.stats = nil
+                guard let self else { return }
+                let device = self.deviceOf[id]
+                let wasStreaming = self.streamingPID[id] != nil
+                self.sessions[id] = nil
+                self.deviceOf[id] = nil
+                self.streamingPID[id] = nil
+                // A stream ended: refresh the device's other sessions' app lists.
+                if wasStreaming, let device {
+                    for (otherId, other) in self.sessions where self.deviceOf[otherId] == device && other.isAuthenticated {
+                        other.resendAppList()
+                    }
+                }
+                if self.sessions.isEmpty { self.clientState = nil; self.stats = nil }
             }
         }
         sessions[id] = session
@@ -223,5 +247,33 @@ final class ServerModel: ObservableObject {
         print("\(stamp)  \(line)"); fflush(stdout)
         Self.logFile?.write(Data("\(stamp)  \(line)\n".utf8))
         if log.count > 200 { log.removeFirst(log.count - 200) }
+    }
+}
+
+// MARK: - Multi-session coordination (PROTOCOL.md §13)
+
+extension ServerModel: SessionCoordinator {
+    func streamedPIDs(excluding sessionID: UUID) -> Set<pid_t> {
+        Set(streamingPID.filter { $0.key != sessionID }.values)
+    }
+
+    func authenticatedSessions(deviceID: String, excluding sessionID: UUID) -> Int {
+        deviceOf.filter { $0.key != sessionID && $0.value == deviceID }.count
+    }
+
+    func sessionDidAuthenticate(_ sessionID: UUID, deviceID: String) {
+        deviceOf[sessionID] = deviceID
+        // A new device takes over the host; sessions from the same device stack.
+        for (otherId, other) in sessions where otherId != sessionID && other.isAuthenticated {
+            if let otherDevice = deviceOf[otherId], otherDevice != deviceID { other.close() }
+        }
+    }
+
+    func sessionStreaming(_ sessionID: UUID, deviceID: String, pid: pid_t?) {
+        streamingPID[sessionID] = pid
+        // Refresh the device's other sessions so their `streamed` flags update.
+        for (otherId, other) in sessions where otherId != sessionID && deviceOf[otherId] == deviceID && other.isAuthenticated {
+            other.resendAppList()
+        }
     }
 }
