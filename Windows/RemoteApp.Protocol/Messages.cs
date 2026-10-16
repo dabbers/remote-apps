@@ -67,6 +67,12 @@ public static class ProtocolFeatures
     /// <summary>The server accepts <see cref="MoveEvent"/> (pointer hover).</summary>
     public const string Move = "move";
 
+    /// <summary>
+    /// The server keeps several sessions from one device open at once, one
+    /// streamed app each (PROTOCOL.md §13). Listed only once a server implements it.
+    /// </summary>
+    public const string MultiSession = "multiSession";
+
     /// <summary>Every optional capability the servers in this repository implement.</summary>
     public static List<string> All => [Move];
 }

@@ -161,21 +161,48 @@ final class InputInjector {
         if let code = key.keyCode {
             postKeyCode(CGKeyCode(code), flags: flags)
         } else if let text = key.text {
-            // One key event per character; the virtual key code is a placeholder,
-            // the unicode payload is what text views insert.
+            // One key event per character. The unicode payload is what text views
+            // insert; the virtual key code is what key-code readers (games,
+            // Calculator, some cross-platform toolkits) act on, so it is the US
+            // key for the character when there is one (plus Shift for a shifted
+            // form such as "@" or "A"), else an unused code. It must never be the
+            // old placeholder 0, which is the A key: those apps saw "a" for every
+            // keystroke.
             for scalar in text.unicodeScalars {
                 var utf16 = Array(String(scalar).utf16)
-                let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true)
-                let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+                let (code, shifted) = Self.typingKeyCode(for: Character(scalar))
+                var keyFlags = flags
+                if shifted { keyFlags.insert(.maskShift) }
+                let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true)
+                let up = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false)
                 down?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
                 up?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
-                down?.flags = flags
-                up?.flags = flags
+                down?.flags = keyFlags
+                up?.flags = keyFlags
                 post(down)
                 post(up)
             }
         }
     }
+
+    /// The virtual key to type `ch` on: its US key and whether Shift is needed,
+    /// or an unused code for characters with no US key (é, emoji…), which text
+    /// views still insert from the unicode payload.
+    private static func typingKeyCode(for ch: Character) -> (CGKeyCode, Bool) {
+        if let code = usKeyCodes[ch] { return (code, false) }
+        if let code = usShiftedKeyCodes[ch] { return (code, true) }
+        if ch.isUppercase, let lower = ch.lowercased().first, let code = usKeyCodes[lower] { return (code, true) }
+        return (unusedKeyCode, false)
+    }
+
+    /// Not a key on any Apple keyboard (HIToolbox defines codes up to 0x7E).
+    private static let unusedKeyCode: CGKeyCode = 0xFF
+
+    /// US-QWERTY shifted symbols → the key that produces them with Shift held.
+    private static let usShiftedKeyCodes: [Character: CGKeyCode] = [
+        "!": 18, "@": 19, "#": 20, "$": 21, "%": 23, "^": 22, "&": 26, "*": 28, "(": 25, ")": 29,
+        "_": 27, "+": 24, "{": 33, "}": 30, "|": 42, ":": 41, "\"": 39, "<": 43, ">": 47, "?": 44, "~": 50,
+    ]
 
     private func postKeyCode(_ code: CGKeyCode, flags: CGEventFlags) {
         let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true)

@@ -328,8 +328,9 @@ share of one core:
 
 ## Next steps
 
-Remote access beyond the tailnet (WebRTC), HEVC, drag gestures on iOS,
-certificate pinning and real account auth.
+Several apps at once as separate windows (specified in PROTOCOL.md §13: one
+connection per app; servers first), remote access beyond the tailnet (WebRTC),
+HEVC, drag gestures on iOS, certificate pinning and real account auth.
 
 ## License
 

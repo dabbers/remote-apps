@@ -107,9 +107,10 @@ token, or omit/null), `screen` = `{width,height,scale}` in points.
 (running, streamable apps), `issuedToken` (save it; present it as `token` next
 time to skip the code), `features?` (optional capabilities beyond the base
 protocol that this server accepts; absent = none). Defined feature names:
-`"move"` — the server accepts the `move` input event (§8). A client must not
-send an optional event the server did not list: an older server treats an
-unknown input case as a protocol error and drops the connection.
+`"move"` — the server accepts the `move` input event (§8); `"multiSession"` —
+the server keeps several sessions from one device open at once (§13). A client
+must not send an optional event the server did not list: an older server
+treats an unknown input case as a protocol error and drops the connection.
 
 ### App list & selection
 
@@ -123,7 +124,8 @@ unknown input case as a protocol error and drops the connection.
 ```
 
 `AppInfo`: `pid`, `bundleIdentifier`, `name`, `windowCount`, `iconPNG?`
-(base64 PNG). `LaunchableApp`: `bundleIdentifier`, `name`, `iconPNG?`.
+(base64 PNG), `streamed?` (bool: a live session is already streaming this app,
+§13; absent = false). `LaunchableApp`: `bundleIdentifier`, `name`, `iconPNG?`.
 
 ### Geometry & video config
 
@@ -267,7 +269,10 @@ The `features` list is what tells a client which optional events it may send.
 
 - **`text`** — the character(s) to type, as a string. Prefer this for all
   printable input; it is OS-neutral. The Mac server inserts it as a Unicode key
-  event.
+  event carried on the character's US key code (with Shift for shifted forms),
+  or on an unused key code for characters that have no US key, so that apps
+  reading the key code rather than the text (games, Calculator) see the right
+  key; text views use the Unicode payload either way.
 - **`keyCode`** — for non-printing keys, a **protocol constant** (these happen to
   equal macOS virtual key codes, but treat them as protocol values):
   `Return=36, Delete/Backspace=51, Tab=48, Escape=53, LeftArrow=123,
@@ -354,3 +359,60 @@ Target: **Windows client → existing macOS server**, TCP+TLS.
 
 Keep the wire code in a small reusable library so the later **Windows server**
 reuses the same framing/JSON/clipboard/input code in the other direction.
+
+## 13. Several apps at once (multi-session)
+
+A client may show several of the host's apps as separate virtual windows at
+the same time. The design is **one connection per streamed app**: every
+existing message keeps its meaning ("the app" is the one this connection
+selected), framing and video are untouched, and a client window maps 1:1 to a
+connection. Nothing is multiplexed. It is additive: no version bump, and a
+client that never opens a second connection sees no difference.
+
+**Server requirements** — advertise `"multiSession"` in `helloAck.features`
+only when all of these hold:
+
+1. **Concurrent sessions per device.** When a connection authenticates with a
+   `deviceID` that already has authenticated sessions, those sessions stay
+   open. (Today both servers close every other authenticated session when a new
+   one authenticates; keep that for a *different* `deviceID`, so a new device
+   still takes over the host.)
+2. **One app per session, one session per app.** `selectApp` / `launchApp` on
+   a session that is already streaming replaces that session's app, as today.
+   Selecting an app that another live session is streaming is refused with
+   `error` (`"already streamed"`) and the session stays in the app-list state:
+   two sessions moving and resizing one window would fight.
+3. **`AppInfo.streamed`.** `true` when a live session is streaming the app, so a
+   client can show it as taken. The server sends a fresh `appList` to the
+   device's other sessions whenever a session starts or stops streaming (a
+   client may also `listApps` at any time). Absent means `false`.
+4. **Independent placement.** Each session positions its own window. Where the
+   capture is a screen region that would include other windows (the Windows
+   server), streamed windows must not overlap each other: place them left to
+   right from the top-left of the work area, wrapping to the next row, never
+   over another streamed window; when the work area is full, the newest window
+   may overlap and its picture may then include the others (no error). With
+   per-app capture (the Mac's `SCContentFilter`) overlap is harmless and
+   placement need not change.
+5. **Activation is per host, as on a single desktop.** Any input other than
+   `move` on a session brings that session's app to the front, so its window
+   becomes the host's active one; the other sessions' input re-activates their
+   app when it arrives (or is dropped until it does, on Windows). `move` never
+   activates (§8).
+6. **Everything else is per session and unchanged:** `screenSize` /
+   `windowGeometry`, `videoConfig` and video frames, `menuTree` / `menuAction`,
+   `ping` / `pong`, and the clipboard (one host clipboard; any session may push
+   or pull). Closing the socket ends only that session and leaves its window
+   where it is.
+7. **Limits.** A server may cap concurrent sessions per device (8 is
+   reasonable); beyond the cap it replies `error` and closes the new connection.
+
+**Client requirements**
+
+- Open a second connection only if `helloAck.features` lists `"multiSession"`;
+  an older server would close the first stream. Authenticate every connection
+  with the saved token; `hello.screen` and later `screenSize` describe that
+  window's own drawable area.
+- Keep the apps/launch picker available while streams are open: opening an app
+  creates a new window with its own connection, closing the window closes its
+  connection. Show `streamed` apps as unavailable.

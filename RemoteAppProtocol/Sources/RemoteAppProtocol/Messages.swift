@@ -71,6 +71,9 @@ public struct HelloAck: Codable, Sendable, Equatable {
 public enum ProtocolFeature {
     /// The server accepts the `move` (pointer hover) input event.
     public static let move = "move"
+    /// The server keeps several sessions from one device open at once, one
+    /// streamed app each (PROTOCOL.md §13). Listed only once a server implements it.
+    public static let multiSession = "multiSession"
     /// Every optional capability the servers in this repository implement.
     public static let all: [String] = [move]
 }
