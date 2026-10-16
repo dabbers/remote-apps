@@ -2,7 +2,8 @@ import SwiftUI
 
 @main
 struct RemoteAppClientApp: App {
-    @StateObject private var model = ClientModel()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var model = ClientModel.shared
 
     var body: some Scene {
         WindowGroup {

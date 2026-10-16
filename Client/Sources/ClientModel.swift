@@ -5,6 +5,10 @@ import RemoteAppProtocol
 
 @MainActor
 final class ClientModel: ObservableObject {
+    /// Shared instance so the Mac menu bar (built outside the SwiftUI view tree)
+    /// can reach the live model.
+    static let shared = ClientModel()
+
     enum Phase: Equatable {
         case browsing
         case connecting(String)
@@ -14,6 +18,11 @@ final class ClientModel: ObservableObject {
     }
 
     @Published var phase: Phase = .browsing
+
+    /// True once past pairing (app list or streaming).
+    var isConnected: Bool {
+        switch phase { case .apps, .streaming: return true; default: return false }
+    }
     @Published var servers: [Discovery.Server] = []
     @Published var transport: Transport.Kind = .tcpTLS { didSet { discovery.start(kind: transport) } }
     @Published var apps: [AppInfo] = []
@@ -24,10 +33,19 @@ final class ClientModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var keyboardVisible = false
     @Published var hudVisible = true
-    @Published var menu: [MenuNode] = []
+    @Published var menu: [MenuNode] = [] {
+        didSet {
+            #if targetEnvironment(macCatalyst)
+            // Rebuild the Mac menu bar to mirror the streamed app.
+            UIMenuSystem.main.setNeedsRebuild()
+            #endif
+        }
+    }
     @Published var launchable: [LaunchableApp] = []
     /// Name of the app currently being streamed (used for the Mac window title).
     @Published var streamingAppName = ""
+    /// Drives the "Open an app" sheet (also from the Mac menu bar).
+    @Published var showLaunchSheet = false
 
     let renderer = VideoRenderer()
     /// Full-screen drawable size in points. Read lazily: at app init the

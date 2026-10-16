@@ -32,7 +32,7 @@ Scripts/gen-cert.sh  regenerates the self-signed dev TLS identity (Server/Resour
 | Capture | `SCContentFilter(display:including:[app])` cropped with `sourceRect` to the main window: menus, sheets and popovers of that app are included, other apps are not | — |
 | Encode/decode | `VTCompressionSession`, H.264 High, real-time, no B-frames, 60 fps, 12 Mbit/s | `AVSampleBufferDisplayLayer` (VideoToolbox decode) fed AVCC access units |
 | Input | `CGEvent.postToPid` on the app's PID: the host cursor does not move | Tap = click (double-click by timing), one-finger pan = scroll, long press = right click, keyboard = key events, two-finger tap = toggle HUD |
-| Menu bar | Read through the Accessibility API (`AXMenuBar` → `AXMenuBarItem` → `AXMenu` → `AXMenuItem`), with titles, enabled/checked state and shortcut hints; items performed with `AXPress` | Native iOS menu sheet (not streamed pixels) from the HUD's menu button; tap a leaf to run it |
+| Menu bar | Read through the Accessibility API (`AXMenuBar` → `AXMenuBarItem` → `AXMenu` → `AXMenuItem`), with titles, enabled/checked state and shortcut hints; items performed with `AXPress` | iPhone/iPad: native menu sheet from the HUD. **Mac: the streamed app's menus appear in the real Mac menu bar**, plus a "Remote" menu to manage the session |
 
 Wire format: `u32 length | u8 kind | payload`; kind 1 is a JSON `ControlMessage`,
 kind 2 is a binary video frame (`pts`, capture wall-clock time, keyframe flag,

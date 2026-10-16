@@ -23,6 +23,15 @@ struct RootView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+        // Presented at the root so "Open an app" works from the list and, on Mac,
+        // from the menu bar while streaming.
+        .sheet(isPresented: $model.showLaunchSheet) {
+            LaunchAppsView { app in
+                model.launchApp(app)
+                model.showLaunchSheet = false
+            }
+            .environmentObject(model)
+        }
     }
 }
 
@@ -122,7 +131,6 @@ struct PairingView: View {
 
 struct AppListView: View {
     @EnvironmentObject var model: ClientModel
-    @State private var showingLaunch = false
 
     var body: some View {
         List {
@@ -148,19 +156,12 @@ struct AppListView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.requestLaunchable()
-                    showingLaunch = true
+                    model.showLaunchSheet = true
                 } label: { Image(systemName: "plus.app") }
             }
             ToolbarItem(placement: .primaryAction) { Button { model.refreshApps() } label: { Image(systemName: "arrow.clockwise") } }
         }
         .refreshable { model.refreshApps() }
-        .sheet(isPresented: $showingLaunch) {
-            LaunchAppsView { app in
-                model.launchApp(app)
-                showingLaunch = false
-            }
-            .environmentObject(model)
-        }
     }
 
     @ViewBuilder

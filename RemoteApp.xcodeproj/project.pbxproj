@@ -21,6 +21,7 @@
 		6307940A8929F72F661D4C5B /* Auth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31EF490DB10514E76D81AB02 /* Auth.swift */; };
 		670AF71256A39B03C7B54D5D /* RemoteAppProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 23D8DE8882C798B9BE8E344A /* RemoteAppProtocol */; };
 		91F1ECD8C8C9241E16795CA9 /* InputInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */; };
+		9A04859A566568B285AD129C /* MacMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419C26293F5A9A3A987E7CA7 /* MacMenu.swift */; };
 		B0D7129E394D44360EF0B261 /* server.p12 in Resources */ = {isa = PBXBuildFile; fileRef = 04C0FE307956BA4D39A3D7AC /* server.p12 */; };
 		BB5ADF4616DF85D1A646CD81 /* TailscaleInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */; };
 		C88187C57C6208EE9DCC7F5C /* WindowCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E6E8C4E48222FDC6CA707C5 /* WindowCapture.swift */; };
@@ -41,6 +42,7 @@
 		3508150C28D206C7B9CDFDEB /* ServerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerModel.swift; sourceTree = "<group>"; };
 		37756DA6723350EA2607DF31 /* H264Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = H264Encoder.swift; sourceTree = "<group>"; };
 		3E6E8C4E48222FDC6CA707C5 /* WindowCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowCapture.swift; sourceTree = "<group>"; };
+		419C26293F5A9A3A987E7CA7 /* MacMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenu.swift; sourceTree = "<group>"; };
 		45E2D57C2AFF812C8937EF33 /* ClientSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientSession.swift; sourceTree = "<group>"; };
 		79931C7387E1C6E61CD94836 /* MenuReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuReader.swift; sourceTree = "<group>"; };
 		7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputInjector.swift; sourceTree = "<group>"; };
@@ -128,6 +130,7 @@
 			children = (
 				E583EA1846D8A25FCB26247D /* ClientModel.swift */,
 				AE167BA201EC33D48EFFFAC1 /* Discovery.swift */,
+				419C26293F5A9A3A987E7CA7 /* MacMenu.swift */,
 				231C7B8E91B769B8EA888D16 /* RemoteAppClientApp.swift */,
 				F18F8002C07509952FC839A0 /* StreamView.swift */,
 				3367F76DDDAF9626B0758F6F /* VideoRenderer.swift */,
@@ -288,6 +291,7 @@
 			files = (
 				F5993C8EE4676D20A95EAB4C /* ClientModel.swift in Sources */,
 				3F146C285ADE0524E402A910 /* Discovery.swift in Sources */,
+				9A04859A566568B285AD129C /* MacMenu.swift in Sources */,
 				CF8A6B9E9E49B47D0BAE6F98 /* RemoteAppClientApp.swift in Sources */,
 				FC4450BE7E0B9CC6F6AF22FE /* StreamView.swift in Sources */,
 				39C8A035383776EA9540BCE2 /* VideoRenderer.swift in Sources */,
