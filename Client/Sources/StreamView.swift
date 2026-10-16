@@ -48,6 +48,10 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
     var onSizeChange: ((CGSize) -> Void)?
     private var lastBoundsSize: CGSize = .zero
 
+    /// One-shot modifiers armed from the accessory bar, applied to the next key.
+    private var activeModifiers: KeyModifiers = []
+    private var modifierButtons: [KeyModifiers: UIButton] = [:]
+
     private let renderer: VideoRenderer
     private let contentView = UIView()
 
@@ -244,17 +248,106 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
     // autocorrect, autocapitalize, or predict; it is a raw key conduit.
 
     func insertText(_ text: String) {
+        let mods = activeModifiers
         if text == "\n" {
-            onInput?(.key(KeyEvent(keyCode: KeyEvent.returnKey)))
+            onInput?(.key(KeyEvent(keyCode: KeyEvent.returnKey, modifiers: mods)))
         } else if text == "\t" {
-            onInput?(.key(KeyEvent(keyCode: KeyEvent.tabKey)))
+            onInput?(.key(KeyEvent(keyCode: KeyEvent.tabKey, modifiers: mods)))
         } else {
-            onInput?(.key(KeyEvent(text: text)))
+            onInput?(.key(KeyEvent(text: text, modifiers: mods)))
         }
+        clearModifiers()
     }
 
     func deleteBackward() {
-        onInput?(.key(KeyEvent(keyCode: KeyEvent.deleteKey)))
+        onInput?(.key(KeyEvent(keyCode: KeyEvent.deleteKey, modifiers: activeModifiers)))
+        clearModifiers()
+    }
+
+    // MARK: Key accessory bar
+    //
+    // A toolbar above the software keyboard with keys the iOS keyboard lacks:
+    // Esc, Tab, arrows, and sticky modifiers (⌃⌥⇧⌘). A modifier is armed by a
+    // tap and applied to the very next key (character or special), then cleared,
+    // so ⌘ then "c" sends ⌘C. Not shown on Mac (Catalyst), which has a real
+    // keyboard and the reproduced menu bar for shortcuts.
+
+    override var inputAccessoryView: UIView? { keyBar }
+
+    private lazy var keyBar: UIView = makeKeyBar()
+
+    private func makeKeyBar() -> UIView {
+        let bar = UIInputView(frame: CGRect(x: 0, y: 0, width: 0, height: 48), inputViewStyle: .keyboard)
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.distribution = .fillEqually
+        stack.spacing = 5
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        stack.addArrangedSubview(specialKey("esc", code: KeyEvent.escapeKey))
+        stack.addArrangedSubview(specialKey("tab", code: KeyEvent.tabKey))
+        stack.addArrangedSubview(modifierKey("⌃", mod: .control))
+        stack.addArrangedSubview(modifierKey("⌥", mod: .option))
+        stack.addArrangedSubview(modifierKey("⇧", mod: .shift))
+        stack.addArrangedSubview(modifierKey("⌘", mod: .command))
+        stack.addArrangedSubview(specialKey("←", code: KeyEvent.leftArrow))
+        stack.addArrangedSubview(specialKey("↑", code: KeyEvent.upArrow))
+        stack.addArrangedSubview(specialKey("↓", code: KeyEvent.downArrow))
+        stack.addArrangedSubview(specialKey("→", code: KeyEvent.rightArrow))
+
+        bar.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.leadingAnchor, constant: 5),
+            stack.trailingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.trailingAnchor, constant: -5),
+            stack.topAnchor.constraint(equalTo: bar.topAnchor, constant: 5),
+            stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -5),
+        ])
+        return bar
+    }
+
+    private func styleKey(_ button: UIButton) {
+        button.titleLabel?.font = .systemFont(ofSize: 17, weight: .regular)
+        button.setTitleColor(.label, for: .normal)
+        button.backgroundColor = UIColor.secondarySystemFill
+        button.layer.cornerRadius = 6
+    }
+
+    private func specialKey(_ title: String, code: UInt16) -> UIButton {
+        let button = UIButton(type: .system, primaryAction: UIAction(title: title) { [weak self] _ in
+            guard let self else { return }
+            self.onInput?(.key(KeyEvent(keyCode: code, modifiers: self.activeModifiers)))
+            self.clearModifiers()
+        })
+        styleKey(button)
+        return button
+    }
+
+    private func modifierKey(_ title: String, mod: KeyModifiers) -> UIButton {
+        let button = UIButton(type: .system, primaryAction: UIAction(title: title) { [weak self] _ in
+            self?.toggleModifier(mod)
+        })
+        styleKey(button)
+        modifierButtons[mod] = button
+        return button
+    }
+
+    private func toggleModifier(_ mod: KeyModifiers) {
+        if activeModifiers.contains(mod) { activeModifiers.remove(mod) } else { activeModifiers.insert(mod) }
+        updateModifierButtons()
+    }
+
+    private func clearModifiers() {
+        guard !activeModifiers.isEmpty else { return }
+        activeModifiers = []
+        updateModifierButtons()
+    }
+
+    private func updateModifierButtons() {
+        for (mod, button) in modifierButtons {
+            let on = activeModifiers.contains(mod)
+            button.backgroundColor = on ? UIColor.tintColor : UIColor.secondarySystemFill
+            button.setTitleColor(on ? .white : .label, for: .normal)
+        }
     }
 
     // Hardware keyboard arrows / escape.

@@ -129,13 +129,19 @@ final class InputInjector {
         if key.modifiers.contains(.option) { flags.insert(.maskAlternate) }
         if key.modifiers.contains(.command) { flags.insert(.maskCommand) }
 
+        // A shortcut (⌘/⌃ held) must be posted as a virtual key code: the window
+        // server matches menu shortcuts and key equivalents on the key code, not
+        // on the unicode payload, so ⌘C via a unicode "c" would not trigger Copy.
+        // Map the typed character to its US-layout key code for that case.
+        if key.keyCode == nil, let text = key.text, text.count == 1,
+           key.modifiers.contains(.command) || key.modifiers.contains(.control),
+           let code = Self.keyCode(for: text) {
+            postKeyCode(code, flags: flags)
+            return
+        }
+
         if let code = key.keyCode {
-            let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: true)
-            let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: false)
-            down?.flags = flags
-            up?.flags = flags
-            post(down)
-            post(up)
+            postKeyCode(CGKeyCode(code), flags: flags)
         } else if let text = key.text {
             // One key event per character; the virtual key code is a placeholder,
             // the unicode payload is what text views insert.
@@ -152,4 +158,28 @@ final class InputInjector {
             }
         }
     }
+
+    private func postKeyCode(_ code: CGKeyCode, flags: CGEventFlags) {
+        let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false)
+        down?.flags = flags
+        up?.flags = flags
+        post(down)
+        post(up)
+    }
+
+    /// US-QWERTY character → virtual key code, for posting modifier shortcuts.
+    private static func keyCode(for text: String) -> CGKeyCode? {
+        guard let ch = text.lowercased().first else { return nil }
+        return usKeyCodes[ch]
+    }
+
+    private static let usKeyCodes: [Character: CGKeyCode] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8,
+        "v": 9, "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17,
+        "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "=": 24, "9": 25,
+        "7": 26, "-": 27, "8": 28, "0": 29, "]": 30, "o": 31, "u": 32, "[": 33,
+        "i": 34, "p": 35, "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42,
+        ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, "`": 50, " ": 49,
+    ]
 }
