@@ -19,6 +19,7 @@ struct StreamView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: StreamUIView, context: Context) {
+        view.hoverEnabled = model.serverFeatures.contains(ProtocolFeature.move)
         if model.keyboardVisible, !view.isFirstResponder {
             view.becomeFirstResponder()
         } else if !model.keyboardVisible, view.isFirstResponder {
@@ -49,7 +50,17 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
     var onToggleHUD: (() -> Void)?
     /// Called when the drawable area changes (rotation, window resize, keyboard).
     var onSizeChange: ((CGSize) -> Void)?
+    /// True when the server accepts `move` events (PROTOCOL.md §8); pointer
+    /// hover (Mac, iPad trackpad/mouse, Pencil hover) then moves the host cursor.
+    var hoverEnabled = false
     private var lastBoundsSize: CGSize = .zero
+
+    /// Hover is rate-limited to ~60/s; the newest position waits here for the
+    /// next slot so the host cursor always ends where the pointer stopped.
+    private let hoverInterval: CFTimeInterval = 1.0 / 60
+    private var lastHoverTime: CFTimeInterval = 0
+    private var pendingHover: NormalizedPoint?
+    private var hoverFlush: DispatchWorkItem?
 
     /// One-shot modifiers armed from the accessory bar, applied to the next key.
     private var activeModifiers: KeyModifiers = []
@@ -95,7 +106,10 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
         let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap))
         twoFingerTap.numberOfTouchesRequired = 2
 
-        for g in [tap, longPress, scroll, pinch, twoFingerPan, twoFingerTap] {
+        // A pointer (Mac, iPad trackpad/mouse, Pencil hover) → host cursor follows.
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
+
+        for g in [tap, longPress, scroll, pinch, twoFingerPan, twoFingerTap, hover] {
             g.delegate = self
             addGestureRecognizer(g)
         }
@@ -187,6 +201,41 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
         }
     }
 
+    // MARK: Pointer hover → host cursor
+
+    @objc private func handleHover(_ g: UIHoverGestureRecognizer) {
+        guard hoverEnabled else { return }
+        switch g.state {
+        case .began, .changed:
+            // Only over the video itself (not the letterbox), and never while a
+            // touch gesture is in flight — a press-and-move is a drag.
+            guard let p = normalized(g.location(in: contentView)) else { return }
+            queueHover(p)
+        default:
+            break
+        }
+    }
+
+    private func queueHover(_ p: NormalizedPoint) {
+        pendingHover = p
+        let elapsed = CACurrentMediaTime() - lastHoverTime
+        if elapsed >= hoverInterval {
+            flushHover()
+        } else if hoverFlush == nil {
+            let item = DispatchWorkItem { [weak self] in self?.flushHover() }
+            hoverFlush = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + (hoverInterval - elapsed), execute: item)
+        }
+    }
+
+    private func flushHover() {
+        hoverFlush = nil
+        guard let p = pendingHover else { return }
+        pendingHover = nil
+        lastHoverTime = CACurrentMediaTime()
+        onInput?(.move(at: p))
+    }
+
     // MARK: Two-finger gestures → local zoom/pan, HUD
 
     @objc private func handleTwoFingerTap() {
@@ -230,8 +279,10 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        // Pinch and two-finger pan work together; everything else stays exclusive.
-        (gestureRecognizer is UIPinchGestureRecognizer && other is UIPanGestureRecognizer)
+        // Hover tracks the pointer alongside everything; pinch and two-finger
+        // pan work together; everything else stays exclusive.
+        if gestureRecognizer is UIHoverGestureRecognizer || other is UIHoverGestureRecognizer { return true }
+        return (gestureRecognizer is UIPinchGestureRecognizer && other is UIPanGestureRecognizer)
             || (gestureRecognizer is UIPanGestureRecognizer && other is UIPinchGestureRecognizer)
     }
 

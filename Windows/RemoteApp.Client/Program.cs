@@ -15,7 +15,7 @@ internal static class Program
         //   RemoteAppClient --smoke <host[:port]> <code|-> <app name|-> <report.txt> <screenshot.png> [seconds]
         if (args.Length >= 6 && args[0] == "--smoke")
         {
-            var seconds = args.Length >= 7 && int.TryParse(args[6], out var s) ? s : 8;
+            var seconds = args.Length >= 7 && int.TryParse(args[6], out var s) ? s : 12;   // seven 1.5 s steps
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             var options = new SmokeOptions(args[1], args[2] == "-" ? null : args[2], args[3] == "-" ? null : args[3], args[4], args[5], seconds);
             Application.Run(new ClientApp(options));

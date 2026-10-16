@@ -30,6 +30,9 @@ final class ClientModel: ObservableObject {
     @Published var transport: Transport.Kind = .tcpTLS { didSet { discovery.start(kind: transport) } }
     @Published var apps: [AppInfo] = []
     @Published var serverName = ""
+    /// Optional protocol capabilities the connected server advertised
+    /// (`ProtocolFeature` names); empty for older servers.
+    @Published var serverFeatures: Set<String> = []
     @Published var geometry: WindowGeometry?
     @Published var latencyMs: Double = 0
     @Published var fps: Double = 0
@@ -325,6 +328,7 @@ final class ClientModel: ObservableObject {
         switch control {
         case .helloAck(let ack):
             serverName = ack.serverName
+            serverFeatures = ack.supportedFeatures
             apps = ack.apps
             phase = .apps
             // Remember this device for next time so the code is not needed again.

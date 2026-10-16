@@ -78,6 +78,18 @@ internal sealed class InputInjector : IDisposable
             {
                 try
                 {
+                    switch (input)
+                    {
+                        case UnknownInputEvent:
+                            continue;   // an optional event from a newer client (PROTOCOL.md §8): ignore
+                        case MoveEvent move:
+                            // Hover never activates the window (a click does): the host
+                            // cursor follows the remote pointer only while the shared
+                            // window already is in front, so it cannot disturb
+                            // whatever else the host is being used for.
+                            if (WindowControl.IsForegroundProcess(_pid)) Send(Move(ScreenPoint(move.At)));
+                            continue;
+                    }
                     if (!EnsureActive())
                     {
                         // Never type into whatever else happens to be in front.

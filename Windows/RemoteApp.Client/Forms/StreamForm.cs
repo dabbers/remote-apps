@@ -56,7 +56,12 @@ internal sealed class StreamForm : Form
         _menu.MenuActivate += (_, _) => _model.RequestMenu();
         _menu.MenuDeactivate += (_, _) => { if (_menuRebuildPending) RebuildMenu(); };
 
-        _surface = new StreamSurface(video) { Dock = DockStyle.Fill, CtrlSendsCommand = model.Settings.CtrlSendsCommand };
+        _surface = new StreamSurface(video)
+        {
+            Dock = DockStyle.Fill,
+            CtrlSendsCommand = model.Settings.CtrlSendsCommand,
+            HoverEnabled = model.ServerFeatures.Contains(RemoteApp.Protocol.ProtocolFeatures.Move),
+        };
         _surface.Input += _model.SendInput;
         _surface.SurfaceResized += OnSurfaceResized;
 

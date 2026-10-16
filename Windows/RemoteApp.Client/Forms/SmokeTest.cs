@@ -22,6 +22,7 @@ internal sealed class SmokeTest
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly System.Windows.Forms.Timer _steps = new() { Interval = 1500 };
     private int _step;
+    private Point _hoverTopLeft;
     private int _presentedFrames;
     private bool _paired;
     private bool _selected;
@@ -149,18 +150,42 @@ internal sealed class SmokeTest
                 _model.SendInput(new Protocol.KeyInputEvent(Protocol.KeyEvent.ForText("Typed by the Windows client via SendInput: héllo wörld 123")));
                 break;
             case 1:
+                // Hover: the host cursor should follow. On loopback the client's own
+                // cursor is the host cursor, so its position is the check.
+                if (!_model.ServerFeatures.Contains(Protocol.ProtocolFeatures.Move)) { Log("hover: the server does not list the move feature; skipped"); break; }
+                Log($"hover: local cursor at {Cursor.Position}; moving the remote pointer to (0.1, 0.1)");
+                _model.SendInput(new Protocol.MoveEvent(new Protocol.NormalizedPoint(0.1, 0.1)));
+                break;
+            case 2:
+                if (!_model.ServerFeatures.Contains(Protocol.ProtocolFeatures.Move)) break;
+                _hoverTopLeft = Cursor.Position;
+                Log($"hover: local cursor at {_hoverTopLeft} after (0.1, 0.1); sweeping to (0.9, 0.9) at ~60 moves/s");
+                for (var i = 1; i <= 10; i++)
+                {
+                    var t = 0.1 + 0.08 * i;
+                    _model.SendInput(new Protocol.MoveEvent(new Protocol.NormalizedPoint(t, t)));
+                    Thread.Sleep(16);
+                }
+                break;
+            case 3:
+                if (!_model.ServerFeatures.Contains(Protocol.ProtocolFeatures.Move)) break;
+                var end = Cursor.Position;
+                var movedDownRight = end.X > _hoverTopLeft.X && end.Y > _hoverTopLeft.Y;
+                Log($"hover: local cursor at {end} after the sweep: {(movedDownRight ? "moved down-right as expected (loopback)" : "did not move down-right (expected only on loopback)")}");
+                break;
+            case 4:
                 if (form == null) { Log("resize: no stream window"); break; }
                 Log($"resize: window client {form.ClientSize.Width}×{form.ClientSize.Height} → shrinking by 280×180 px");
                 form.ClientSize = new Size(form.ClientSize.Width - 280, form.ClientSize.Height - 180);
                 break;
-            case 2:
+            case 5:
                 if (Environment.GetEnvironmentVariable("REMOTEAPP_SMOKE_NO_CLIPBOARD") == "1") { Log("clipboard: skipped"); break; }
                 Log("clipboard: select all + copy on the host, then pull the host clipboard");
                 _model.SendInput(new Protocol.KeyInputEvent(Protocol.KeyEvent.ForText("a", Protocol.KeyModifiers.Command)));
                 _model.SendInput(new Protocol.KeyInputEvent(Protocol.KeyEvent.ForText("c", Protocol.KeyModifiers.Command)));
                 _model.SendInput(new Protocol.KeyInputEvent(Protocol.KeyEvent.ForKeyCode(Protocol.KeyCodes.End, Protocol.KeyModifiers.Command)));
                 break;
-            case 3:
+            case 6:
                 if (Environment.GetEnvironmentVariable("REMOTEAPP_SMOKE_NO_CLIPBOARD") != "1") _model.RequestClipboard();
                 _model.RequestMenu();
                 DumpFrame?.Invoke(Path.ChangeExtension(_options.ScreenshotPath, ".frame.png"));

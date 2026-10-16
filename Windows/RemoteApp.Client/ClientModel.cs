@@ -35,6 +35,8 @@ public sealed class ClientModel
     public string ConnectingTo { get; private set; } = "";
     public string ServerName { get; private set; } = "";
     public double HostScale { get; private set; } = 2;
+    /// <summary>Optional protocol capabilities the connected server listed (<see cref="ProtocolFeatures"/>); empty for older servers.</summary>
+    public IReadOnlySet<string> ServerFeatures { get; private set; } = new HashSet<string>();
     public List<AppInfo> Apps { get; private set; } = [];
     public List<LaunchableApp> Launchable { get; private set; } = [];
     public WindowGeometry? Geometry { get; private set; }
@@ -285,6 +287,7 @@ public sealed class ClientModel
             case HelloAckMessage ack:
                 ServerName = ack.Ack.ServerName;
                 HostScale = ack.Ack.HostScale;
+                ServerFeatures = new HashSet<string>(ack.Ack.Features ?? [], StringComparer.Ordinal);
                 Apps = ack.Ack.Apps;
                 if (!string.IsNullOrEmpty(ack.Ack.IssuedToken))
                 {

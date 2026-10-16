@@ -49,13 +49,30 @@ public struct HelloAck: Codable, Sendable, Equatable {
     /// A pairing token the client should save and present next time to skip the
     /// code. Sent only after a successful code-based pairing.
     public var issuedToken: String?
+    /// Optional capabilities this server accepts beyond the base protocol
+    /// (names in `ProtocolFeature`). Absent from older servers, which a client
+    /// must treat as "none" (see `supportedFeatures`).
+    public var features: [String]?
 
-    public init(serverName: String, hostScale: Double, apps: [AppInfo], issuedToken: String? = nil) {
+    public init(serverName: String, hostScale: Double, apps: [AppInfo], issuedToken: String? = nil, features: [String]? = nil) {
         self.serverName = serverName
         self.hostScale = hostScale
         self.apps = apps
         self.issuedToken = issuedToken
+        self.features = features
     }
+
+    /// `features` as a set, empty when the server sent none.
+    public var supportedFeatures: Set<String> { Set(features ?? []) }
+}
+
+/// Names of the optional capabilities a server may list in `HelloAck.features`.
+/// A client sends an optional event only if the server listed its feature.
+public enum ProtocolFeature {
+    /// The server accepts the `move` (pointer hover) input event.
+    public static let move = "move"
+    /// Every optional capability the servers in this repository implement.
+    public static let all: [String] = [move]
 }
 
 /// Client's drawable area, in points, plus its backing scale.
@@ -200,7 +217,7 @@ public struct KeyEvent: Codable, Sendable, Equatable {
     public static let upArrow: UInt16 = 126
 }
 
-public enum InputEvent: Codable, Sendable, Equatable {
+public enum InputEvent: Sendable, Equatable {
     /// A click at `at`. The server derives double-clicks from timing.
     case tap(at: NormalizedPoint, button: MouseButton)
     /// A long press; the server maps this to a secondary (right) click.
@@ -210,6 +227,96 @@ public enum InputEvent: Codable, Sendable, Equatable {
     /// Left-button drag, one message per phase.
     case drag(at: NormalizedPoint, phase: DragPhase)
     case key(KeyEvent)
+    /// Pointer hover at `at` with no button held: the host cursor follows it.
+    /// Optional — send only if the server lists `ProtocolFeature.move`, and at
+    /// most ~60 per second (PROTOCOL.md §8).
+    case move(at: NormalizedPoint)
+    /// An input case this build does not know, sent by a newer peer. Decodes to
+    /// this no-op instead of failing the message; never encoded.
+    case unknown(String)
+}
+
+extension InputEvent: Codable {
+    // Hand-written to produce exactly what Codable synthesis produces for the
+    // known cases (PROTOCOL.md §4: a single-key envelope named after the case,
+    // labeled fields as keys, one unlabeled value under "_0"), while mapping an
+    // unknown case name to `.unknown` rather than throwing. Optional events can
+    // thus be added without a protocol version bump.
+    private struct CaseKey: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(_ name: String) { stringValue = name }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+    private enum TapKeys: String, CodingKey { case at, button }
+    private enum PointKeys: String, CodingKey { case at }
+    private enum ScrollKeys: String, CodingKey { case at, dx, dy }
+    private enum DragKeys: String, CodingKey { case at, phase }
+    private enum WrappedKeys: String, CodingKey { case _0 }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CaseKey.self)
+        guard let key = container.allKeys.first else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "empty input event"))
+        }
+        switch key.stringValue {
+        case "tap":
+            let c = try container.nestedContainer(keyedBy: TapKeys.self, forKey: key)
+            self = .tap(at: try c.decode(NormalizedPoint.self, forKey: .at),
+                        button: try c.decodeIfPresent(MouseButton.self, forKey: .button) ?? .left)
+        case "longPress":
+            let c = try container.nestedContainer(keyedBy: PointKeys.self, forKey: key)
+            self = .longPress(at: try c.decode(NormalizedPoint.self, forKey: .at))
+        case "scroll":
+            let c = try container.nestedContainer(keyedBy: ScrollKeys.self, forKey: key)
+            self = .scroll(at: try c.decode(NormalizedPoint.self, forKey: .at),
+                           dx: try c.decode(Double.self, forKey: .dx),
+                           dy: try c.decode(Double.self, forKey: .dy))
+        case "drag":
+            let c = try container.nestedContainer(keyedBy: DragKeys.self, forKey: key)
+            self = .drag(at: try c.decode(NormalizedPoint.self, forKey: .at),
+                         phase: try c.decode(DragPhase.self, forKey: .phase))
+        case "key":
+            let c = try container.nestedContainer(keyedBy: WrappedKeys.self, forKey: key)
+            self = .key(try c.decode(KeyEvent.self, forKey: ._0))
+        case "move":
+            let c = try container.nestedContainer(keyedBy: PointKeys.self, forKey: key)
+            self = .move(at: try c.decode(NormalizedPoint.self, forKey: .at))
+        default:
+            self = .unknown(key.stringValue)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CaseKey.self)
+        switch self {
+        case .tap(let at, let button):
+            var c = container.nestedContainer(keyedBy: TapKeys.self, forKey: CaseKey("tap"))
+            try c.encode(at, forKey: .at)
+            try c.encode(button, forKey: .button)
+        case .longPress(let at):
+            var c = container.nestedContainer(keyedBy: PointKeys.self, forKey: CaseKey("longPress"))
+            try c.encode(at, forKey: .at)
+        case .scroll(let at, let dx, let dy):
+            var c = container.nestedContainer(keyedBy: ScrollKeys.self, forKey: CaseKey("scroll"))
+            try c.encode(at, forKey: .at)
+            try c.encode(dx, forKey: .dx)
+            try c.encode(dy, forKey: .dy)
+        case .drag(let at, let phase):
+            var c = container.nestedContainer(keyedBy: DragKeys.self, forKey: CaseKey("drag"))
+            try c.encode(at, forKey: .at)
+            try c.encode(phase, forKey: .phase)
+        case .key(let key):
+            var c = container.nestedContainer(keyedBy: WrappedKeys.self, forKey: CaseKey("key"))
+            try c.encode(key, forKey: ._0)
+        case .move(let at):
+            var c = container.nestedContainer(keyedBy: PointKeys.self, forKey: CaseKey("move"))
+            try c.encode(at, forKey: .at)
+        case .unknown(let name):
+            throw EncodingError.invalidValue(self, .init(codingPath: encoder.codingPath, debugDescription: "cannot encode unknown input event '\(name)'"))
+        }
+    }
 }
 
 // MARK: Menu bar

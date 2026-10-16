@@ -1,6 +1,7 @@
 // Copyright (c) 2026 dabbers (https://github.com/dabbers)
 // SPDX-License-Identifier: MIT
 
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using RemoteApp.Protocol;
 using Xunit;
@@ -17,7 +18,8 @@ public class JsonSamplesTests
     public static IEnumerable<object[]> Samples() =>
     [
         ["""{"hello":{"_0":{"clientName":"Dave's iPhone","credential":"123456","deviceID":"A1B2-C3D4","protocolVersion":1,"screen":{"height":844,"scale":3,"width":390},"token":"tok_abc"}}}"""],
-        ["""{"helloAck":{"_0":{"apps":[{"bundleIdentifier":"com.apple.TextEdit","name":"TextEdit","pid":501,"windowCount":1}],"hostScale":2,"issuedToken":"tok_new","serverName":"dab-mba"}}}"""],
+        ["""{"helloAck":{"_0":{"apps":[{"bundleIdentifier":"com.apple.TextEdit","name":"TextEdit","pid":501,"windowCount":1}],"features":["move"],"hostScale":2,"issuedToken":"tok_new","serverName":"dab-mba"}}}"""],
+        ["""{"helloAck":{"_0":{"apps":[],"hostScale":2,"serverName":"older-server"}}}"""],
         ["""{"authFailed":{"reason":"wrong pairing code"}}"""],
         ["""{"listApps":{}}"""],
         ["""{"appList":{"_0":[{"bundleIdentifier":"com.apple.TextEdit","iconPNG":"iVBORw==","name":"TextEdit","pid":501,"windowCount":1}]}}"""],
@@ -32,6 +34,7 @@ public class JsonSamplesTests
         ["""{"input":{"_0":{"longPress":{"at":{"x":0.5,"y":0.25}}}}}"""],
         ["""{"input":{"_0":{"scroll":{"at":{"x":0.5,"y":0.5},"dx":0,"dy":-40}}}}"""],
         ["""{"input":{"_0":{"drag":{"at":{"x":0.5,"y":0.5},"phase":"began"}}}}"""],
+        ["""{"input":{"_0":{"move":{"at":{"x":0.5,"y":0.5}}}}}"""],
         ["""{"input":{"_0":{"key":{"_0":{"isDown":true,"modifiers":0,"text":"a"}}}}}"""],
         ["""{"input":{"_0":{"key":{"_0":{"isDown":true,"modifiers":8,"text":"c"}}}}}"""],
         ["""{"input":{"_0":{"key":{"_0":{"isDown":true,"keyCode":36,"modifiers":0}}}}}"""],
@@ -99,5 +102,30 @@ public class JsonSamplesTests
         var message = ProtocolJson.Decode("""{"input":{"_0":{"tap":{"at":{"x":0.1,"y":0.2}}}}}""");
         var tap = Assert.IsType<TapEvent>(Assert.IsType<InputMessage>(message).Event);
         Assert.Equal(MouseButton.Left, tap.Button);
+    }
+
+    [Fact]
+    public void UnknownInputEventIsLenient()
+    {
+        // PROTOCOL.md §8: an optional event this build does not know is a no-op, not a dropped connection.
+        var message = ProtocolJson.Decode("""{"input":{"_0":{"wiggle":{"amount":3}}}}""");
+        var unknown = Assert.IsType<UnknownInputEvent>(Assert.IsType<InputMessage>(message).Event);
+        Assert.Equal("wiggle", unknown.Name);
+        Assert.Throws<JsonException>(() => ProtocolJson.EncodeToString(new InputMessage(unknown)));
+    }
+
+    [Fact]
+    public void HelloAckFeaturesDefaultToNone()
+    {
+        var older = Assert.IsType<HelloAckMessage>(ProtocolJson.Decode("""{"helloAck":{"_0":{"apps":[],"hostScale":2,"serverName":"host"}}}"""));
+        Assert.Null(older.Ack.Features);
+        Assert.False(older.Ack.Supports(ProtocolFeatures.Move));
+
+        var current = new HelloAck("host", 2, [], null, ProtocolFeatures.All);
+        Assert.True(current.Supports(ProtocolFeatures.Move));
+        var json = ProtocolJson.EncodeToString(new HelloAckMessage(current));
+        Assert.Contains("\"features\":[\"move\"]", json);
+        var none = ProtocolJson.EncodeToString(new HelloAckMessage(new HelloAck("host", 2, [], null)));
+        Assert.DoesNotContain("features", none);
     }
 }

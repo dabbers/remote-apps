@@ -41,12 +41,35 @@ public sealed record Hello(
     [property: JsonPropertyName("token")] string? Token,
     [property: JsonPropertyName("screen")] ScreenSize Screen);
 
-/// <summary>Auth succeeded (server → client). <see cref="IssuedToken"/> is present only after a code pairing.</summary>
+/// <summary>
+/// Auth succeeded (server → client). <see cref="IssuedToken"/> is present only
+/// after a code pairing. <see cref="Features"/> lists the optional capabilities
+/// this server accepts (<see cref="ProtocolFeatures"/>); older servers omit it.
+/// </summary>
 public sealed record HelloAck(
     [property: JsonPropertyName("serverName")] string ServerName,
     [property: JsonPropertyName("hostScale")] double HostScale,
     [property: JsonPropertyName("apps")] List<AppInfo> Apps,
-    [property: JsonPropertyName("issuedToken")] string? IssuedToken);
+    [property: JsonPropertyName("issuedToken")] string? IssuedToken,
+    [property: JsonPropertyName("features")] List<string>? Features = null)
+{
+    /// <summary>True if the server listed <paramref name="feature"/>; false for servers that sent none.</summary>
+    public bool Supports(string feature) => Features?.Contains(feature, StringComparer.Ordinal) == true;
+}
+
+/// <summary>
+/// Names of the optional capabilities a server may list in
+/// <see cref="HelloAck.Features"/> (PROTOCOL.md §5). A client sends an optional
+/// event only if the server listed its feature.
+/// </summary>
+public static class ProtocolFeatures
+{
+    /// <summary>The server accepts <see cref="MoveEvent"/> (pointer hover).</summary>
+    public const string Move = "move";
+
+    /// <summary>Every optional capability the servers in this repository implement.</summary>
+    public static List<string> All => [Move];
+}
 
 // MARK: Apps
 
@@ -195,6 +218,20 @@ public sealed record ScrollEvent(NormalizedPoint At, double Dx, double Dy) : Inp
 public sealed record DragEvent(NormalizedPoint At, DragPhase Phase) : InputEvent;
 
 public sealed record KeyInputEvent(KeyEvent Key) : InputEvent;
+
+/// <summary>
+/// Pointer hover at <paramref name="At"/> with no button held: the host cursor
+/// follows it. Optional — send only if the server listed
+/// <see cref="ProtocolFeatures.Move"/>, only while the pointer is over the
+/// video, and at most ~60 per second (PROTOCOL.md §8).
+/// </summary>
+public sealed record MoveEvent(NormalizedPoint At) : InputEvent;
+
+/// <summary>
+/// An input event whose case name this build does not know, sent by a newer
+/// peer. Decoded leniently to this no-op (PROTOCOL.md §8). Never sent.
+/// </summary>
+public sealed record UnknownInputEvent(string Name) : InputEvent;
 
 // MARK: Menu bar
 

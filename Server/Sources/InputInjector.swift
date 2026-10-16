@@ -47,6 +47,19 @@ final class InputInjector {
 
     func handle(_ event: InputEvent) {
         queue.async { [self] in
+            switch event {
+            case .unknown:
+                return   // an optional event from a newer client (PROTOCOL.md §8): ignore
+            case .move(let at):
+                // Hover never activates the app (a click does): the host cursor
+                // follows the remote pointer only while the streamed app is
+                // already frontmost, so it cannot disturb whatever else is in use.
+                guard WindowControl.isFrontmost(pid: pid) else { return }
+                post(mouseEvent(.mouseMoved, at: screenPoint(at), button: .left, clickState: 0))
+                return
+            default:
+                break
+            }
             ensureActive()
             switch event {
             case .tap(let at, let button):
@@ -59,6 +72,8 @@ final class InputInjector {
                 drag(at: screenPoint(at), phase: phase)
             case .key(let key):
                 self.key(key)
+            case .move, .unknown:
+                break   // handled above
             }
         }
     }

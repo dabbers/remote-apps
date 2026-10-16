@@ -180,7 +180,7 @@ internal sealed class ClientSession
         _clientScreen = hello.Screen;
         Authenticated?.Invoke();
         var hostScale = WindowControl.Scale(WindowControl.PrimaryMonitor());
-        Send(new HelloAckMessage(new HelloAck(_serverName, hostScale, FetchApps(), issued)));
+        Send(new HelloAckMessage(new HelloAck(_serverName, hostScale, FetchApps(), issued, ProtocolFeatures.All)));
     }
 
     private T OnUi<T>(Func<T> action)

@@ -201,7 +201,8 @@ final class ClientSession {
             let snapshot = try await ShareableApps.fetch()
             if asHelloAck {
                 let hostScale = Double(NSScreen.main?.backingScaleFactor ?? 2)
-                send(.helloAck(HelloAck(serverName: serverName, hostScale: hostScale, apps: snapshot.apps, issuedToken: issuedToken)))
+                send(.helloAck(HelloAck(serverName: serverName, hostScale: hostScale, apps: snapshot.apps, issuedToken: issuedToken,
+                                        features: ProtocolFeature.all)))
             } else {
                 send(.appList(snapshot.apps))
             }

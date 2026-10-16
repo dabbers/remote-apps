@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 using System.ComponentModel;
+using System.Diagnostics;
 using RemoteApp.Client.Input;
 using RemoteApp.Protocol;
 using Windows.Win32;
@@ -22,10 +23,19 @@ internal sealed class StreamSurface : Control
     /// <summary>Client points scrolled per wheel notch (the iOS client sends finger distance; ~40 pt reads naturally).</summary>
     private const double WheelStepPoints = 40;
 
+    /// <summary>Minimum interval between hover moves (~60/s, PROTOCOL.md §8).</summary>
+    private const int HoverIntervalMs = 16;
+
     private readonly VideoPipeline _video;
     private Point _pressPoint;
     private bool _dragging;
     private char? _pendingHighSurrogate;
+
+    private readonly System.Windows.Forms.Timer _hoverTimer = new() { Interval = HoverIntervalMs };
+    private readonly Stopwatch _hoverClock = Stopwatch.StartNew();
+    private long _lastHoverMs = -HoverIntervalMs;
+    private NormalizedPoint? _pendingHover;
+    private NormalizedPoint? _lastHover;
 
     /// <summary>Raised for every input event to forward to the host.</summary>
     public event Action<InputEvent>? Input;
@@ -37,9 +47,18 @@ internal sealed class StreamSurface : Control
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public bool CtrlSendsCommand { get; set; } = true;
 
+    /// <summary>
+    /// True when the host listed <see cref="ProtocolFeatures.Move"/>: hovering
+    /// over the video then moves the host cursor. Off for older servers, which
+    /// would drop the connection on an input event they do not know.
+    /// </summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool HoverEnabled { get; set; }
+
     public StreamSurface(VideoPipeline video)
     {
         _video = video;
+        _hoverTimer.Tick += (_, _) => { _hoverTimer.Stop(); FlushHover(); };
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.Opaque
                  | ControlStyles.Selectable | ControlStyles.UserMouse, true);
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, false);
@@ -60,6 +79,12 @@ internal sealed class StreamSurface : Control
     {
         _video.DetachSurface();
         base.OnHandleDestroyed(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _hoverTimer.Dispose();
+        base.Dispose(disposing);
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
@@ -120,11 +145,20 @@ internal sealed class StreamSurface : Control
             _dragging = false;
             Capture = true;
         }
+        // A press-and-move is a drag; drop any hover still waiting for its slot.
+        _hoverTimer.Stop();
+        _pendingHover = null;
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        if (e.Button == MouseButtons.None)
+        {
+            // No button held: a hover, sent only while over the video itself.
+            if (HoverEnabled && Normalize(e.Location) is { } at) QueueHover(at);
+            return;
+        }
         if (!e.Button.HasFlag(MouseButtons.Left)) return;
         if (!_dragging)
         {
@@ -136,6 +170,36 @@ internal sealed class StreamSurface : Control
             Send(new DragEvent(origin, DragPhase.Began));
         }
         Send(new DragEvent(ClampNormalize(e.Location), DragPhase.Moved));
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        // Never report a position the pointer has already left.
+        _hoverTimer.Stop();
+        _pendingHover = null;
+    }
+
+    /// <summary>
+    /// Rate-limits hover to ~60/s while always delivering the newest position:
+    /// a move inside the interval waits for the timer instead of being dropped,
+    /// so the host cursor ends exactly where the pointer stopped.
+    /// </summary>
+    private void QueueHover(NormalizedPoint at)
+    {
+        if (_pendingHover == null && at == _lastHover) return;   // WM_MOUSEMOVE without motion
+        _pendingHover = at;
+        if (_hoverClock.ElapsedMilliseconds - _lastHoverMs >= HoverIntervalMs) FlushHover();
+        else if (!_hoverTimer.Enabled) _hoverTimer.Start();
+    }
+
+    private void FlushHover()
+    {
+        if (_pendingHover is not { } at) return;
+        _pendingHover = null;
+        _lastHover = at;
+        _lastHoverMs = _hoverClock.ElapsedMilliseconds;
+        Send(new MoveEvent(at));
     }
 
     protected override void OnMouseUp(MouseEventArgs e)

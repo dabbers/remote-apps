@@ -40,7 +40,7 @@ gitignored `Config/Local.xcconfig` (see [Running](#running)).
 | Window sizing | Accessibility API moves/resizes the app's main window to the phone's point size, then reports what the app accepted | Letterboxes (`resizeAspect`) when the app clamped; pinch to zoom |
 | Capture | `SCContentFilter(display:including:[app])` cropped with `sourceRect` to the main window: menus, sheets and popovers of that app are included, other apps are not | — |
 | Encode/decode | `VTCompressionSession`, H.264 High, real-time, no B-frames, 60 fps, 12 Mbit/s | `AVSampleBufferDisplayLayer` (VideoToolbox decode) fed AVCC access units |
-| Input | `CGEvent.postToPid` on the app's PID: the host cursor does not move | Tap = click (double-click by timing), one-finger pan = scroll, long press = right click, keyboard = key events, two-finger tap = toggle HUD |
+| Input | `CGEvent`s posted through the HID event tap after bringing the app frontmost, so clicks are hit-tested like real ones; a client's pointer hover (`move`) moves the host cursor without activating anything | Tap = click (double-click by timing), one-finger pan = scroll, long press = right click, keyboard = key events, two-finger tap = toggle HUD; a pointer (Mac, iPad trackpad/mouse) hovering over the video moves the host cursor |
 | Menu bar | Read through the Accessibility API (`AXMenuBar` → `AXMenuBarItem` → `AXMenu` → `AXMenuItem`), with titles, enabled/checked state and shortcut hints; items performed with `AXPress` | iPhone/iPad: native menu sheet from the HUD. **Mac: the streamed app's menus appear in the real Mac menu bar**, plus a "Remote" menu to manage the session |
 | Keyboard | Virtual key codes and modifier flags posted as `CGEvent`s; a `⌘`/`⌃`+character is posted by its US-layout key code so menu shortcuts (Copy, Paste…) fire | Software keyboard plus an **accessory bar**: Esc, Tab, arrows, and sticky `⌃⌥⇧⌘` modifiers that arm for the next key (`⌘` then `c` = ⌘C) |
 | Clipboard | **Shared both ways** via `NSPasteboard`, in a platform-neutral form: text as UTF-8, images as PNG/JPEG, files written to `~/Downloads/RemoteApp` and put on the pasteboard | HUD → clipboard: pull the Mac's clipboard (text/images paste-ready), or push this device's clipboard, picked **Photos**, or **Files**; received files/photos saved via the share sheet |
@@ -249,7 +249,10 @@ launch an installed one. The app opens as its own window:
   Ctrl to ⌃. Printable text is sent as text (layout-independent); arrows, Tab,
   Return, Escape, Delete, Home/End, Page Up/Down and F-keys as protocol key codes.
 - **Mouse.** Click = tap (double-clicks by timing on the host), press-and-move
-  = drag, right/middle click, wheel and horizontal wheel = scroll.
+  = drag, right/middle click, wheel and horizontal wheel = scroll. Hovering over
+  the video moves the host cursor (`move` events, at most ~60/s, only when the
+  server lists the `move` feature in its hello), so tooltips, hover highlights
+  and cursor shapes follow the pointer.
 - Settings (device ID, recent hosts, pairing tokens) live in
   `%APPDATA%\RemoteAppClient\settings.json`. Received files land in
   `Downloads\RemoteApp`.
@@ -265,7 +268,8 @@ top-left of the primary work area and resized to the client's size.
 
 **Smoke test.** The client has an unattended mode used to verify a build against
 a running server; it connects, pairs, selects (or launches) an app, types,
-resizes, pulls the clipboard, then writes a report and a screenshot:
+hovers (on loopback it checks that the local cursor followed), resizes, pulls
+the clipboard, then writes a report and a screenshot:
 
 ```bash
 Windows/RemoteApp.Client/bin/Debug/net10.0-windows/RemoteAppClient.exe --smoke 127.0.0.1:53124 <code|-> Notepad report.txt shot.png 12
@@ -303,7 +307,9 @@ share of one core:
 - Capture is the monitor region under the window, so other windows overlapping
   it are visible (as on the Mac, "the host is in use"); the window is activated
   before input is injected and input is dropped if it cannot be brought to the
-  front. Only the primary graphics adapter's monitors can be captured.
+  front. Hover never activates it: the host cursor follows the remote pointer
+  only while the shared window already is in the foreground. Only the primary
+  graphics adapter's monitors can be captured.
 - Classic Win32 menu bars only; apps that draw their own menus (WinUI, Electron,
   Office) report none — their menus still appear in the video.
 - The mouse pointer is composited from the duplication API's pointer shape (a
@@ -318,8 +324,8 @@ share of one core:
 
 ## Next steps
 
-Remote access beyond the tailnet (WebRTC), HEVC, a `move` input event for
-hover, drag gestures on iOS, certificate pinning and real account auth.
+Remote access beyond the tailnet (WebRTC), HEVC, drag gestures on iOS,
+certificate pinning and real account auth.
 
 ## License
 

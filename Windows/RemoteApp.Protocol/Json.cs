@@ -83,8 +83,12 @@ public sealed class InputEventConverter : JsonConverter<InputEvent>
                     body.GetProperty("phase").Deserialize<DragPhase>(options));
             case "key":
                 return new KeyInputEvent(Envelope.Unwrap<KeyEvent>(body, options));
+            case "move":
+                return new MoveEvent(body.GetProperty("at").Deserialize<NormalizedPoint>(options));
             default:
-                throw new JsonException($"unknown input event '{name}'");
+                // Optional events may be added without a version bump (§8): a
+                // name this build does not know is a no-op, not a protocol error.
+                return new UnknownInputEvent(name);
         }
     }
 
@@ -127,6 +131,14 @@ public sealed class InputEventConverter : JsonConverter<InputEvent>
                 writer.WritePropertyName("key");
                 Envelope.WriteWrapped(writer, k.Key, options);
                 break;
+            case MoveEvent m:
+                writer.WriteStartObject("move");
+                writer.WritePropertyName("at");
+                JsonSerializer.Serialize(writer, m.At, options);
+                writer.WriteEndObject();
+                break;
+            case UnknownInputEvent u:
+                throw new JsonException($"cannot encode unknown input event '{u.Name}'");
             default:
                 throw new JsonException($"unsupported input event {value.GetType().Name}");
         }

@@ -94,7 +94,7 @@ Exact encodings (one representative instance each). **C→S** = client sends,
 {"hello":{"_0":{"clientName":"Dave's iPhone","credential":"123456","deviceID":"A1B2-C3D4","protocolVersion":1,"screen":{"height":844,"scale":3,"width":390},"token":"tok_abc"}}}
 
 // S→C  helloAck  (auth succeeded; issuedToken present only after a code pairing)
-{"helloAck":{"_0":{"apps":[{"bundleIdentifier":"com.apple.TextEdit","name":"TextEdit","pid":501,"windowCount":1}],"hostScale":2,"issuedToken":"tok_new","serverName":"dab-mba"}}}
+{"helloAck":{"_0":{"apps":[{"bundleIdentifier":"com.apple.TextEdit","name":"TextEdit","pid":501,"windowCount":1}],"features":["move"],"hostScale":2,"issuedToken":"tok_new","serverName":"dab-mba"}}}
 
 // S→C  authFailed
 {"authFailed":{"reason":"wrong pairing code"}}
@@ -105,7 +105,11 @@ Exact encodings (one representative instance each). **C→S** = client sends,
 token, or omit/null), `screen` = `{width,height,scale}` in points.
 `HelloAck`: `serverName`, `hostScale` (host display backing scale), `apps`
 (running, streamable apps), `issuedToken` (save it; present it as `token` next
-time to skip the code).
+time to skip the code), `features?` (optional capabilities beyond the base
+protocol that this server accepts; absent = none). Defined feature names:
+`"move"` — the server accepts the `move` input event (§8). A client must not
+send an optional event the server did not list: an older server treats an
+unknown input case as a protocol error and drops the connection.
 
 ### App list & selection
 
@@ -142,6 +146,7 @@ SPS, PPS[, VPS]), pixel size, `nalLengthSize` (AVCC length prefix size, 4).
 {"input":{"_0":{"longPress":{"at":{"x":0.5,"y":0.25}}}}}
 {"input":{"_0":{"scroll":{"at":{"x":0.5,"y":0.5},"dx":0,"dy":-40}}}}
 {"input":{"_0":{"drag":{"at":{"x":0.5,"y":0.5},"phase":"began"}}}}      // phase: began|moved|ended|cancelled
+{"input":{"_0":{"move":{"at":{"x":0.5,"y":0.5}}}}}                       // pointer hover, no button; only if helloAck.features has "move"
 {"input":{"_0":{"key":{"_0":{"isDown":true,"modifiers":0,"text":"a"}}}}}             // printable char
 {"input":{"_0":{"key":{"_0":{"isDown":true,"modifiers":8,"text":"c"}}}}}             // ⌘C (command bit set)
 {"input":{"_0":{"key":{"_0":{"isDown":true,"keyCode":36,"modifiers":0}}}}}           // Return
@@ -236,6 +241,26 @@ coordinates, so the client needs no knowledge of host pixels. `scroll.dx/dy` are
 in **client points** (positive `dy` = content moved down / finger down); the
 server scales them to host points.
 
+**Hover (`move`).** A pointer position with no button held, for clients that
+have a pointer (a Mac, a PC, an iPad with a trackpad or mouse). The server moves
+the host cursor there so hover effects, tooltips and cursor shapes follow the
+remote pointer. Rules:
+
+- Send `move` only if `helloAck.features` lists `"move"`.
+- Send it only while the pointer is over the video (never for the letterbox
+  margins or when the pointer leaves the view), and only when no button is
+  down — a press-and-move is a `drag`, which carries its own positions.
+- Rate-limit to about **60 per second**, always delivering the *latest*
+  position when the limit holds one back. Moves are small (~50 bytes) but share
+  the control stream with everything else.
+- The server must not activate or raise the shared window for a `move` (a click
+  does that); it may drop moves while the shared window is not in front.
+
+**Unknown input events.** A server that receives an `input` whose case name it
+does not know must ignore it (decode it to a no-op) rather than treat it as a
+protocol error, so that optional events can be added without a version bump.
+The `features` list is what tells a client which optional events it may send.
+
 ## 9. Keys and modifiers (cross-platform notes)
 
 `KeyEvent` = `{ text?, keyCode?, modifiers, isDown }`.
@@ -296,6 +321,10 @@ Both sides exist in `Windows/` (see the README). Platform specifics of the
 - Modifiers: `command` and `control` both become Ctrl, `option` Alt, `shift`
   Shift. `text` is typed as real key presses when the active layout has the
   character, else as a Unicode key event.
+- Input other than `move` first brings the shared window to the foreground and
+  is dropped if that fails. `move` (advertised in `features`) never activates
+  it: the host cursor follows the remote pointer only while the shared window
+  already is the foreground window.
 - `videoConfig` is sent before the first keyframe of each encoder instance
   (every resize rebuilds the encoder) and whenever the SPS/PPS change.
 
