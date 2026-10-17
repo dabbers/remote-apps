@@ -136,6 +136,9 @@ internal static class WindowControl
         return foreground != HWND.Null && ProcessId(foreground) == pid;
     }
 
+    /// <summary>False when the session has no foreground window at all, e.g. a disconnected Remote Desktop session.</summary>
+    public static bool HasForegroundWindow => PInvoke.GetForegroundWindow() != HWND.Null;
+
     /// <summary>
     /// Brings the window to the front. SetForegroundWindow is restricted for
     /// background processes, so attach to the foreground thread's input queue

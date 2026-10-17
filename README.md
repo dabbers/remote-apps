@@ -305,6 +305,13 @@ share of one core:
 
 **Windows limitations (prototype).**
 
+- **The host's session must be attached to a display.** A Remote Desktop
+  session that was disconnected (not signed out) has no display and no
+  foreground window: Desktop Duplication finds no output and input cannot be
+  delivered, so the server reports "no display is attached to the host's
+  session" until the session is back on the console (`tscon`, or sign in at
+  the machine) or a virtual display adapter keeps a display attached. Signing
+  in at the console or over a *connected* Remote Desktop session both work.
 - Capture is the monitor region under the window, so other windows overlapping
   it are visible (as on the Mac, "the host is in use"); the window is activated
   before input is injected and input is dropped if it cannot be brought to the

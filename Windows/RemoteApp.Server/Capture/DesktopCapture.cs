@@ -111,9 +111,11 @@ internal sealed unsafe class DesktopCapture : IDisposable
         var dxgiDevice = (IDXGIDevice)_gpu.Device;
         dxgiDevice.GetAdapter(out var adapter);
         IDXGIOutput? found = null;
+        var outputs = 0;
         for (uint i = 0; ; i++)
         {
             if (adapter.EnumOutputs(i, out var output).Failed) break;
+            outputs++;
             var desc = output.GetDesc();
             if (desc.Monitor == _monitor)
             {
@@ -125,7 +127,16 @@ internal sealed unsafe class DesktopCapture : IDisposable
             Mf.Release(output);
         }
         Mf.Release(adapter);
-        if (found == null) throw new InvalidOperationException("the window's monitor is not on the primary graphics adapter");
+        if (found == null)
+        {
+            // A disconnected Remote Desktop session has no display at all: every
+            // adapter reports zero outputs and there is nothing to duplicate (nor
+            // a foreground window for input). Say so instead of blaming the GPU.
+            throw new InvalidOperationException(outputs == 0
+                ? "no display is attached to the host's session (a disconnected Remote Desktop session has none): " +
+                  "reattach the session to the console or keep a physical or virtual display attached"
+                : "the window's monitor is not on the primary graphics adapter");
+        }
 
         var output1 = (IDXGIOutput1)found;
         output1.DuplicateOutput(_gpu.Device, out var duplication);

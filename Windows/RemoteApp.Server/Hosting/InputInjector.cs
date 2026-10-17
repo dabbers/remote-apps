@@ -136,7 +136,9 @@ internal sealed class InputInjector : IDisposable
         WindowControl.Activate(_hwnd);
         Thread.Sleep(120);
         var active = WindowControl.IsForegroundProcess(_pid);
-        Log?.Invoke(active ? $"activated window of pid {_pid} for input" : $"could not activate window of pid {_pid}");
+        Log?.Invoke(active ? $"activated window of pid {_pid} for input"
+            : WindowControl.HasForegroundWindow ? $"could not activate window of pid {_pid}"
+            : $"could not activate window of pid {_pid}: the host's session has no foreground window (disconnected Remote Desktop session?)");
         return active;
     }
 
