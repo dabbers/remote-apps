@@ -303,15 +303,53 @@ share of one core:
 | GPU (default) | 32 fps (display-limited) | ~10 ms | ~5% | ~5% |
 | CPU (`REMOTEAPP_FORCE_CPU_VIDEO=1`) | 32 fps | ~24 ms | ~10% | ~60% |
 
-**Windows limitations (prototype).**
+**Using the Windows host remotely.** The server needs the signed-in session to
+be attached to a display: that is where the desktop is composed and where
+foreground windows live. A Remote Desktop session that was *disconnected* (not
+signed out) has neither. Windows parks it on a placeholder display, Desktop
+Duplication finds no output, nothing can be brought to the foreground, and the
+server reports "no display is attached to the host's session". Remote Desktop
+itself works unattended because its service attaches a kernel display driver
+to the session while a client is connected; a user-mode app cannot do that,
+but the same effect comes from two standard pieces:
 
-- **The host's session must be attached to a display.** A Remote Desktop
-  session that was disconnected (not signed out) has no display and no
-  foreground window: Desktop Duplication finds no output and input cannot be
-  delivered, so the server reports "no display is attached to the host's
-  session" until the session is back on the console (`tscon`, or sign in at
-  the machine) or a virtual display adapter keeps a display attached. Signing
-  in at the console or over a *connected* Remote Desktop session both work.
+1. **A virtual display**, so the session has a monitor even when none is
+   plugged in or switched on. [Virtual Display
+   Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT,
+   code-signed through SignPath, Windows 10/11) is the one this README assumes.
+   From an elevated PowerShell:
+
+   ```bash
+   winget install --id=VirtualDrivers.Virtual-Display-Driver -e
+   ```
+
+   (or download *Virtual Driver Control* from its releases and click Install).
+   Then put the modes you want in `C:\VirtualDisplayDriver\vdd_settings.xml`,
+   for example one monitor with a `2560×1440` entry at `60` Hz under
+   `<resolutions>`, and reboot or restart the driver. Make the virtual monitor
+   the primary display if the physical one is usually off, so the shared
+   window is placed on it.
+2. **Return the session to the console when Remote Desktop disconnects.**
+   Remote Desktop moves the session off the console and leaves it displayless
+   on disconnect; a scheduled task running `tscon` puts it back, where the
+   virtual (or physical) display takes over. From an elevated PowerShell:
+
+   ```bash
+   powershell -ExecutionPolicy Bypass -File Windows\scripts\Install-ConsoleReturn.ps1
+   ```
+
+   This registers "RemoteApp Return Session To Console", which runs
+   `Windows/scripts/Return-SessionToConsole.ps1` as SYSTEM a few seconds after
+   any remote session disconnects (`-Uninstall` removes it). You can also run
+   that script by hand, or `tscon <id> /dest:console` with the id from `quser`.
+
+Once both are in place, the server keeps working after you close Remote
+Desktop, and this app can be the only remote tool in daily use. Be aware that
+the console is then an **unlocked desktop**: anyone at the machine's keyboard
+sees the session. Signing in at the console or over a *connected* Remote
+Desktop session works without any of this.
+
+**Windows limitations (prototype).**
 - Capture is the monitor region under the window, so other windows overlapping
   it are visible (as on the Mac, "the host is in use"); the window is activated
   before input is injected and input is dropped if it cannot be brought to the
