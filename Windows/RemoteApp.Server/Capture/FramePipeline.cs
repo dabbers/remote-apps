@@ -109,9 +109,9 @@ internal sealed unsafe class FramePipeline : IDisposable
                         0, D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_READ);
                 path = _encoder.UsesGpuInput ? "GPU convert, texture to encoder" : "GPU convert, NV12 readback to encoder";
             }
-            catch (COMException e)
+            catch (Exception e)
             {
-                Error?.Invoke($"GPU color conversion unavailable (0x{e.HResult:X8}); converting on the CPU");
+                Error?.Invoke($"GPU color conversion unavailable (0x{e.HResult:X8} {e.Message}); converting on the CPU");
                 ReleaseGpuResources();
                 _converter = null;
                 path = "CPU convert";
@@ -157,9 +157,10 @@ internal sealed unsafe class FramePipeline : IDisposable
             if (_converter != null) EncodeViaGpu(frame, pts, captureWallMicros);
             else EncodeViaCpu(frame, pts, captureWallMicros);
         }
-        catch (COMException e)
+        catch (Exception e)
         {
-            Error?.Invoke($"conversion failed: 0x{e.HResult:X8}");
+            // Runs on the capture thread; anything escaping would end the process.
+            Error?.Invoke($"conversion failed: 0x{e.HResult:X8} {e.Message}");
         }
     }
 
@@ -208,9 +209,9 @@ internal sealed unsafe class FramePipeline : IDisposable
                     if (_encoder.UsesGpuInput) _encoder.EncodeTexture(_nv12[pending.Slot], pending.Pts, pending.Wall);
                     else EncodeReadback(pending);
                 }
-                catch (COMException e)
+                catch (Exception e)
                 {
-                    Error?.Invoke($"encode failed: 0x{e.HResult:X8}");
+                    Error?.Invoke($"encode failed: 0x{e.HResult:X8} {e.Message}");
                 }
             }
         }

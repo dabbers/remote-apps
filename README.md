@@ -343,7 +343,17 @@ but the same effect comes from two standard pieces:
    any remote session disconnects (`-Uninstall` removes it). You can also run
    that script by hand, or `tscon <id> /dest:console` with the id from `quser`.
 
-Once both are in place, the server keeps working after you close Remote
+3. **Start the server at sign-in**, so nobody has to launch it:
+
+   ```bash
+   powershell -ExecutionPolicy Bypass -File Windows\scripts\Install-StartAtLogon.ps1
+   ```
+
+   registers a per-user task (no elevation) that starts the server when you
+   sign in, at the console or over Remote Desktop; pass `-ExePath` for a
+   published build, `-Uninstall` to remove it.
+
+Once these are in place, the server keeps working after you close Remote
 Desktop, and this app can be the only remote tool in daily use. Be aware that
 the console is then an **unlocked desktop**: anyone at the machine's keyboard
 sees the session. Signing in at the console or over a *connected* Remote

@@ -368,9 +368,10 @@ internal sealed unsafe class H264Encoder : IDisposable
                         break;
                 }
             }
-            catch (COMException e)
+            catch (Exception e)
             {
-                Error?.Invoke($"encoder event error: 0x{e.HResult:X8}");
+                // The event thread must outlive any single failure.
+                Error?.Invoke($"encoder event error: 0x{e.HResult:X8} {e.Message}");
             }
             finally
             {

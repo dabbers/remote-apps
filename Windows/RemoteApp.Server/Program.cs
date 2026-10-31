@@ -13,6 +13,12 @@ internal static class Program
     private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        // The capture, encode and input threads run outside the UI loop, and an
+        // exception escaping one of them ends the process with nothing in the
+        // server's own log. Leave a trace in a crash log first.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => WriteCrashLog("unhandled exception", e.ExceptionObject as Exception);
+        Application.ThreadException += (_, e) => WriteCrashLog("UI thread exception", e.Exception);
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         // Self-test of input injection: types the text into a local text box and
         // prints what arrived. Usage: RemoteAppServer --type-test "some text"
         if (args.Length >= 2 && args[0] == "--type-test")
@@ -21,6 +27,20 @@ internal static class Program
             return;
         }
         Application.Run(new ServerForm());
+    }
+
+    /// <summary>Appends to RemoteAppServer.crash.log beside the regular log (which another writer holds open).</summary>
+    private static void WriteCrashLog(string kind, Exception? e)
+    {
+        try
+        {
+            var path = Path.Combine(TlsIdentity.Directory, "RemoteAppServer.crash.log");
+            File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {kind}: {e}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Nothing sensible left to do while the process is going down.
+        }
     }
 
     private static void TypeTest(string text)

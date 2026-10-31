@@ -68,43 +68,86 @@ internal sealed unsafe class DesktopCapture : IDisposable
 
     private void Run()
     {
+        // Nothing may escape this thread: an exception that does ends the whole
+        // process (CsWin32 maps E_ACCESSDENIED to UnauthorizedAccessException,
+        // which is not a COMException, and that is exactly how the server once
+        // died silently while a client was connecting).
         try
         {
-            CreateDuplication();
+            if (!TryCreateDuplication(attempts: 3)) return;
+            var failures = 0;
+            while (!_stop.IsSet)
+            {
+                if (_duplication == null)
+                {
+                    // Lost below: rebuild, with a pause between attempts.
+                    try { CreateDuplication(); failures = 0; }
+                    catch (Exception e)
+                    {
+                        if (failures++ == 0) Error?.Invoke($"desktop duplication lost: {Describe(e)}; retrying");
+                        if (failures > 20) { Error?.Invoke("desktop duplication could not be restored; capture stopped"); return; }
+                        _stop.Wait(1000);
+                        continue;
+                    }
+                }
+                try
+                {
+                    CaptureOne();
+                }
+                catch (Exception e) when (IsAccessLost(e))
+                {
+                    // Mode change, UAC/secure desktop, or the output went away.
+                    ReleaseDuplication();
+                    _stop.Wait(250);
+                }
+                catch (Exception e)
+                {
+                    Error?.Invoke($"capture error: {Describe(e)}");
+                    _stop.Wait(250);
+                }
+            }
         }
-        catch (Exception e) when (e is COMException or InvalidOperationException)
+        catch (Exception e)
         {
-            Error?.Invoke($"desktop duplication unavailable: {e.Message}");
-            return;
+            Error?.Invoke($"capture stopped: {Describe(e)}");
         }
+        finally
+        {
+            ReleaseDuplication();
+            ReleaseTextures();
+        }
+    }
 
-        while (!_stop.IsSet)
+    /// <summary>
+    /// Creates the duplication, retrying briefly when the desktop refuses access
+    /// (a secure-desktop switch is momentary); reports and returns false when it
+    /// stays unavailable, with the reason a user can act on.
+    /// </summary>
+    private bool TryCreateDuplication(int attempts)
+    {
+        for (var attempt = 1; ; attempt++)
         {
             try
             {
-                if (!CaptureOne()) continue;
+                CreateDuplication();
+                return true;
             }
-            catch (COMException e) when ((uint)e.HResult == (uint)HRESULT.DXGI_ERROR_ACCESS_LOST)
+            catch (Exception e)
             {
-                // Mode change, UAC desktop, or the output went away: rebuild.
-                ReleaseDuplication();
-                Thread.Sleep(250);
-                try { CreateDuplication(); }
-                catch (Exception inner) when (inner is COMException or InvalidOperationException)
-                {
-                    Error?.Invoke($"desktop duplication lost: {inner.Message}");
-                    Thread.Sleep(1000);
-                }
-            }
-            catch (COMException e)
-            {
-                Error?.Invoke($"capture error 0x{e.HResult:X8}");
-                Thread.Sleep(250);
+                if (IsAccessDenied(e) && attempt < attempts && !_stop.IsSet) { _stop.Wait(300); continue; }
+                Error?.Invoke("desktop duplication unavailable: " + (IsAccessDenied(e)
+                    ? "access denied. A Remote Desktop session or the secure desktop can refuse it; the session must be on the console with a display (see the README, \"Using the Windows host remotely\")"
+                    : Describe(e)));
+                return false;
             }
         }
-        ReleaseDuplication();
-        ReleaseTextures();
     }
+
+    private static bool IsAccessDenied(Exception e) => e is UnauthorizedAccessException || (uint)e.HResult == 0x80070005;
+
+    private static bool IsAccessLost(Exception e) => (uint)e.HResult == (uint)HRESULT.DXGI_ERROR_ACCESS_LOST || IsAccessDenied(e);
+
+    private static string Describe(Exception e) => e is COMException ? $"0x{e.HResult:X8} {e.Message}" : e.Message;
 
     private void CreateDuplication()
     {
