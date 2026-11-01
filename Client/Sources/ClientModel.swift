@@ -193,11 +193,20 @@ final class ClientModel: ObservableObject {
             }
         }
         conn.onMessage = { [weak self] message in
-            // Video goes straight to the renderer off the main thread.
+            // Video, and the configuration it decodes under, go straight to the
+            // renderer off the main thread, in arrival order. A config that took
+            // the main-actor hop with the other messages could land after the
+            // keyframe it describes, and that keyframe was then dropped
+            // (PROTOCOL.md §11); with the next keyframe far off, the picture
+            // stayed black on a reconnect until a resize forced a new encoder.
             if case .video(let frame) = message {
                 self?.renderer.enqueue(frame) { latency in
                     Task { @MainActor in self?.recordFrame(latencyMs: latency) }
                 }
+                return
+            }
+            if case .control(.videoConfig(let config)) = message {
+                self?.renderer.apply(config)
                 return
             }
             Task { @MainActor in self?.handle(message) }
@@ -247,6 +256,7 @@ final class ClientModel: ObservableObject {
         connection = nil
         renderer.reset()
         geometry = nil
+        keyboardVisible = false   // or the keyboard comes back up on the next stream
         phase = .browsing
     }
 
@@ -343,8 +353,6 @@ final class ClientModel: ObservableObject {
             apps = list
         case .windowGeometry(let g):
             geometry = g
-        case .videoConfig(let config):
-            renderer.apply(config)
         case .menuTree(let tree):
             menu = tree
         case .launchableApps(let list):
