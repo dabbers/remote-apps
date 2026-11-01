@@ -364,6 +364,16 @@ but the same effect comes from two standard pieces:
    sign in, at the console or over Remote Desktop; pass `-ExePath` for a
    published build, `-Uninstall` to remove it.
 
+Steps 1 and 2 are one elevated run, and the script asks for elevation itself
+(a UAC prompt in your session), so any PowerShell window will do:
+
+```bash
+powershell -ExecutionPolicy Bypass -File Windows\scripts\Setup-RemoteHost.ps1
+```
+
+`-WithStartAtLogon` adds step 3, `-Transcript <file>` logs everything, and
+`-Uninstall` reverses what the same switches installed.
+
 Once these are in place, the server keeps working after you close Remote
 Desktop, and this app can be the only remote tool in daily use. Be aware that
 the console is then an **unlocked desktop**: anyone at the machine's keyboard
