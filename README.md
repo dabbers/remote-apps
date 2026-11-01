@@ -317,18 +317,29 @@ but the same effect comes from two standard pieces:
    plugged in or switched on. [Virtual Display
    Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver) (MIT,
    code-signed through SignPath, Windows 10/11) is the one this README assumes.
-   From an elevated PowerShell:
+   Its winget package
 
    ```bash
    winget install --id=VirtualDrivers.Virtual-Display-Driver -e
    ```
 
-   (or download *Virtual Driver Control* from its releases and click Install).
-   Then put the modes you want in `C:\VirtualDisplayDriver\vdd_settings.xml`,
-   for example one monitor with a `2560×1440` entry at `60` Hz under
-   `<resolutions>`, and reboot or restart the driver. Make the virtual monitor
-   the primary display if the physical one is usually off, so the shared
-   window is placed on it.
+   installs the *VDD Control* app as a portable package (no elevation), and
+   with it the signed driver and Microsoft's devcon. Installing the driver
+   itself needs an elevated PowerShell: either click *Install Driver* in that
+   app, or run
+
+   ```bash
+   powershell -ExecutionPolicy Bypass -File Windows\scripts\Install-VirtualDisplay.ps1
+   ```
+
+   which checks the driver's and devcon's signatures, trusts the signer so no
+   dialog waits for a click, writes `C:\VirtualDisplayDriver\vdd_settings.xml`
+   for one 2560×1440 @ 60 Hz display if the file is missing (`-Width`,
+   `-Height`, `-RefreshRate`, `-ReplaceSettings`), and creates the device.
+   `-DryRun` previews all of it without elevation; `-Uninstall` removes the
+   device, the driver and the trusted signer. If you do sit at the physical
+   monitor one day and it shows an empty desktop, make it the main display in
+   Settings > System > Display.
 2. **Return the session to the console when Remote Desktop disconnects.**
    Remote Desktop moves the session off the console and leaves it displayless
    on disconnect; a scheduled task running `tscon` puts it back, where the
