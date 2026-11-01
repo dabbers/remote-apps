@@ -337,6 +337,11 @@ A client must keep `videoConfig` ordered with the frames that follow it: both
 arrive on the same stream, and the keyframe right after a config will not
 decode under the previous configuration.
 
+A server emits a keyframe at least every two seconds of wall time while frames
+flow, whatever its frame-count GOP says: on a quiet window the capture delivers
+only a few frames a second, and a client that missed one keyframe (or joined
+late) would otherwise wait a minute for the next.
+
 ## 12. Windows C# client — first milestone (historical)
 
 Target: **Windows client → existing macOS server**, TCP+TLS.

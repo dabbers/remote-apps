@@ -8,6 +8,7 @@ using Windows.Win32.Graphics.Direct3D11;
 using Windows.Win32.Graphics.Dxgi;
 using Windows.Win32.Graphics.Dxgi.Common;
 using Windows.Win32.Graphics.Gdi;
+using Windows.Win32.System.Power;
 
 namespace RemoteApp.Server.Capture;
 
@@ -74,6 +75,7 @@ internal sealed unsafe class DesktopCapture : IDisposable
         // died silently while a client was connecting).
         try
         {
+            KeepDisplayOn();
             if (!TryCreateDuplication(attempts: 3)) return;
             var failures = 0;
             while (!_stop.IsSet)
@@ -115,7 +117,23 @@ internal sealed unsafe class DesktopCapture : IDisposable
         {
             ReleaseDuplication();
             ReleaseTextures();
+            PInvoke.SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS);
         }
+    }
+
+    /// <summary>
+    /// A host that is used remotely turns its display off after the power
+    /// plan's idle timeout, and the desktop is then no longer composed: the
+    /// duplication only times out, even as windows appear (measured: a
+    /// connecting client got no frame at all until an input event). Wake the
+    /// display and keep it on while this thread captures. The one-shot call is
+    /// what wakes a display that is already off; the continuous state, which
+    /// is per thread and cleared above when the thread ends, keeps it on.
+    /// </summary>
+    private static void KeepDisplayOn()
+    {
+        PInvoke.SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS | EXECUTION_STATE.ES_DISPLAY_REQUIRED);
+        PInvoke.SetThreadExecutionState(EXECUTION_STATE.ES_DISPLAY_REQUIRED);
     }
 
     /// <summary>

@@ -204,3 +204,5 @@ BITMAP
 DeleteObject
 HBITMAP
 SIZE
+SetThreadExecutionState
+EXECUTION_STATE

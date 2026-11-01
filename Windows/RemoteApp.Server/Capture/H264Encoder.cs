@@ -13,7 +13,7 @@ namespace RemoteApp.Server.Capture;
 
 /// <summary>
 /// Media Foundation H.264 encoder tuned for low latency: CBR, no B-frames,
-/// a keyframe every two seconds, low-latency mode. Prefers a hardware MFT
+/// a keyframe at least every two seconds, low-latency mode. Prefers a hardware MFT
 /// (Intel/NVIDIA/AMD, which are asynchronous and driven by their event queue)
 /// and falls back to the in-box software encoder (synchronous). Input is NV12,
 /// either as a D3D11 texture (D3D-aware encoders, no system-memory copy) or
@@ -39,6 +39,10 @@ internal sealed unsafe class H264Encoder : IDisposable
     /// <summary>Frames dropped because the (asynchronous) encoder did not ask for input in time.</summary>
     public int BusyDrops => _busyDrops;
 
+    /// <summary>Keyframes emitted, and the longest wall-clock gap between two of them.</summary>
+    public int Keyframes => _keyframes;
+    public double LongestKeyframeGapMs => _longestKeyframeGapMs;
+
     // MediaEventType values an asynchronous MFT raises (mfobjects.h).
     private const uint TransformNeedInput = 601;
     private const uint TransformHaveOutput = 602;
@@ -58,6 +62,13 @@ internal sealed unsafe class H264Encoder : IDisposable
     private readonly SemaphoreSlim _needInput = new(0, int.MaxValue);
     private readonly ConcurrentDictionary<long, ulong> _wallByPts = new();
     private List<byte[]> _lastParameterSets = [];
+    private ICodecAPI? _codec;
+    // Keyframe cadence by wall clock; see RequestKeyframeIfStale.
+    private const int KeyframeIntervalMs = 2000;
+    private long _lastKeyframeAt = Environment.TickCount64;
+    private long _keyframeForcedAt;
+    private int _keyframes;
+    private long _longestKeyframeGapMs;
     private byte[]? _nv12;
     private readonly object _lock = new();
     private bool _disposed;
@@ -185,6 +196,7 @@ internal sealed unsafe class H264Encoder : IDisposable
 
         if (transform is ICodecAPI codec)
         {
+            _codec = codec;
             SetCodecValue(codec, typeof(CODECAPI_AVEncCommonRateControlMode).GUID, (uint)eAVEncCommonRateControlMode.eAVEncCommonRateControlMode_CBR);
             SetCodecValue(codec, typeof(CODECAPI_AVEncCommonMeanBitRate).GUID, (uint)_bitrate);
             SetCodecValue(codec, typeof(CODECAPI_AVLowLatencyMode).GUID, true);
@@ -237,6 +249,24 @@ internal sealed unsafe class H264Encoder : IDisposable
     {
         try { codec.SetValue(&api, value); }
         catch (COMException) { /* not supported by this encoder */ }
+    }
+
+    /// <summary>
+    /// The GOP size set above is a frame count. On a quiet window the capture
+    /// delivers a few frames a second, which puts the next keyframe a minute
+    /// away, and a client that missed one (or joined late) shows nothing until
+    /// then. Like the Mac server's MaxKeyFrameIntervalDuration, ask for a
+    /// keyframe whenever the last one is older than two seconds. Called with
+    /// the lock held, right before a frame goes in.
+    /// </summary>
+    private void RequestKeyframeIfStale()
+    {
+        if (_codec == null) return;
+        var now = Environment.TickCount64;
+        if (now - Volatile.Read(ref _lastKeyframeAt) < KeyframeIntervalMs) return;
+        if (now - _keyframeForcedAt < 500) return;   // one request is in flight (an asynchronous encoder answers a frame or two later)
+        _keyframeForcedAt = now;
+        SetCodecValue(_codec, typeof(CODECAPI_AVEncVideoForceKeyFrame).GUID, 1u);
     }
 
     // MARK: Encoding
@@ -312,6 +342,7 @@ internal sealed unsafe class H264Encoder : IDisposable
                 lock (_lock)
                 {
                     if (_disposed || _transform == null) return;
+                    RequestKeyframeIfStale();
                     _transform.ProcessInput(_inputId, sample, 0).ThrowOnFailure();
                 }
             }
@@ -320,6 +351,7 @@ internal sealed unsafe class H264Encoder : IDisposable
                 lock (_lock)
                 {
                     if (_disposed || _transform == null) return;
+                    RequestKeyframeIfStale();
                     var hr = _transform.ProcessInput(_inputId, sample, 0);
                     if (hr == HRESULT.MF_E_NOTACCEPTING)
                     {
@@ -478,6 +510,14 @@ internal sealed unsafe class H264Encoder : IDisposable
         }
         if (_lastParameterSets.Count == 0) return;   // no decoder config yet; a keyframe will bring one
         if (unit.Data.Length == 0) return;
+        if (keyframe)
+        {
+            var now = Environment.TickCount64;
+            var gap = now - _lastKeyframeAt;
+            if (_keyframes > 0 && gap > _longestKeyframeGapMs) _longestKeyframeGapMs = gap;
+            Volatile.Write(ref _lastKeyframeAt, now);
+            _keyframes++;
+        }
 
         _wallByPts.TryRemove(sampleTime, out var wall);
         if (_wallByPts.Count > 120) _wallByPts.Clear();

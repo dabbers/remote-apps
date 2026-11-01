@@ -38,7 +38,8 @@ internal sealed unsafe class FramePipeline : IDisposable
 
     public string TimingSummary => _encodedFrames == 0 ? $"{_capturedFrames} captured, no frames encoded"
         : $"{_capturedFrames} captured, {_encodedFrames} encoded, capture→encoded avg {_encodeLatencySumMs / _encodedFrames:0.0} ms, " +
-          $"max {_encodeLatencyMaxMs:0.0} ms, {_encoder.BusyDrops} dropped by a busy encoder";
+          $"max {_encodeLatencyMaxMs:0.0} ms, {_encoder.BusyDrops} dropped by a busy encoder, " +
+          $"{_encoder.Keyframes} keyframes (longest gap {_encoder.LongestKeyframeGapMs / 1000.0:0.0} s)";
 
     /// <summary>Encoded size (even).</summary>
     public int Width { get; }

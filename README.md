@@ -378,7 +378,10 @@ Once these are in place, the server keeps working after you close Remote
 Desktop, and this app can be the only remote tool in daily use. Be aware that
 the console is then an **unlocked desktop**: anyone at the machine's keyboard
 sees the session. Signing in at the console or over a *connected* Remote
-Desktop session works without any of this.
+Desktop session works without any of this. The server also wakes the display
+and keeps it on while it captures: once the power plan's display timeout has
+passed, nothing is composed on the host, and a client would otherwise connect
+to a black picture until some input arrived.
 
 **Windows limitations (prototype).**
 - Capture is the monitor region under the window, so other windows overlapping
