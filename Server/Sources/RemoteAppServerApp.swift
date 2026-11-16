@@ -8,7 +8,7 @@ struct RemoteAppServerApp: App {
     @StateObject private var model = ServerModel()
 
     var body: some Scene {
-        WindowGroup("RemoteApp Server") {
+        WindowGroup("dabtop Server") {
             ContentView()
                 .environmentObject(model)
                 .frame(minWidth: 460, minHeight: 520)

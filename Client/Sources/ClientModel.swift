@@ -39,6 +39,18 @@ final class ClientModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var keyboardVisible = false
     @Published var hudVisible = true
+
+    // MARK: Foldable (iPhone Duo)
+    /// Hinge state reported by the stream view; `.unknown` on flat devices and
+    /// before the first update. The HUD shows the flex toggle only when half-open.
+    @Published var posture: DevicePosture = .unknown
+    /// True while the laptop deck (menu bar, keyboard, trackpad) is on screen.
+    @Published var flexActive = false
+    /// Half-open in landscape, like a laptop: stream on the upright half, a
+    /// trackpad on the flat half. Off, the stream fills the screen regardless.
+    @Published var flexModeEnabled: Bool = UserDefaults.standard.object(forKey: "flexMode") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(flexModeEnabled, forKey: "flexMode") }
+    }
     @Published var menu: [MenuNode] = [] {
         didSet {
             #if targetEnvironment(macCatalyst)
@@ -66,7 +78,13 @@ final class ClientModel: ObservableObject {
     /// window does not exist yet and UIScreen may report a placeholder size.
     var screen: ScreenSize {
         let uiScreen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen ?? UIScreen.main
-        return ScreenSize(width: uiScreen.bounds.width, height: uiScreen.bounds.height, scale: uiScreen.scale)
+        var size = uiScreen.bounds.size
+        // A half-open foldable streams on its upper half only (the hinge
+        // crosses the long axis), so ask for that from the start.
+        if posture == .partiallyOpen, flexModeEnabled, size.height > size.width {
+            size.height = floor(size.height / 2)
+        }
+        return ScreenSize(width: size.width, height: size.height, scale: uiScreen.scale)
     }
 
     private let discovery = Discovery()
@@ -388,4 +406,9 @@ final class ClientModel: ObservableObject {
             self.latencyMs = latencyEMA ?? 0
         }
     }
+}
+
+/// How far a foldable's hinge is open. Flat devices and Mac report `.unknown`.
+enum DevicePosture: Equatable {
+    case unknown, closed, partiallyOpen, fullyOpen
 }

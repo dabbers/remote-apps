@@ -1,4 +1,4 @@
-# RemoteApp — stream one app window to another device
+# dabtop (RemoteApp) — stream one app window to another device
 
 Proof of concept: a server captures a single app's main window, encodes it
 with hardware H.264, and streams it to a client that shows it and sends taps,
@@ -150,6 +150,21 @@ the simulator).
      of being covered.
    - **Controls:** the eye icon hides the HUD; **two-finger tap** anywhere shows
      it again.
+   - **Foldable (iPhone Duo):** the stream follows whichever display is in use —
+     the cover display when closed, the inner display when open — and the host
+     window is resized to match each time. Held half-open like a laptop (the
+     hinge crosses the inner display's long axis, so this is a portrait view
+     split at mid-height), the client switches to a **laptop layout**: the app
+     streams on the upright half and the flat half becomes a deck with the host app's **menu
+     bar** (native menus with submenus, checkmarks and shortcut hints), a
+     compact **keyboard** (one-shot ⇧⌃⌥⌘, esc/tab/arrows) and a **trackpad**
+     (one finger moves a cursor over the video, tap clicks, two fingers scroll,
+     long press or two-finger tap right-clicks). The laptop icon in the HUD
+     turns the layout off for a plain full-screen stream. Hinge state comes from
+     `UIHingeInteraction` (iOS 27.1+); older systems and flat devices never see
+     the layout. In a Debug build, launching with `REMOTEAPP_POSTURE=partiallyOpen`
+     (or `closed` / `fullyOpen`) forces a posture to try the layouts on a plain
+     simulator.
    - **Menu bar:** the menu-bar-rectangle icon opens the host app's menus as a
      native iOS sheet (File/Edit/Format/…), with submenus, disabled items greyed,
      checkmarks, and shortcut hints. Tapping a leaf runs it on the Mac; the sheet

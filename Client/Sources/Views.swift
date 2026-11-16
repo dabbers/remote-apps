@@ -68,13 +68,13 @@ struct DiscoveryView: View {
             } header: {
                 Text("Connect over Tailscale")
             } footer: {
-                Text("Enter the MagicDNS name or tailnet IP shown in RemoteApp Server. The server is reachable only over your tailnet.")
+                Text("Enter the MagicDNS name or tailnet IP shown in dabtop Server. The server is reachable only over your tailnet.")
             }
             Section("Macs on this network (Bonjour, optional)") {
                 if model.servers.isEmpty {
                     HStack {
                         ProgressView()
-                        Text("Looking for RemoteApp servers…").foregroundStyle(.secondary)
+                        Text("Looking for dabtop servers…").foregroundStyle(.secondary)
                     }
                 }
                 ForEach(model.servers) { server in
@@ -89,7 +89,7 @@ struct DiscoveryView: View {
                 Section { HStack { ProgressView(); Text("Connecting to \(name)…") } }
             }
         }
-        .navigationTitle("RemoteApp")
+        .navigationTitle("dabtop")
     }
 
     private func connectManual() {
@@ -107,7 +107,7 @@ struct PairingView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            Text("Enter the pairing code shown in RemoteApp Server on “\(serverName)”.")
+            Text("Enter the pairing code shown in dabtop Server on “\(serverName)”.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
             TextField("000000", text: $code)
@@ -247,8 +247,19 @@ struct StreamingScreen: View {
                         showingMenu = true
                     } label: { Image(systemName: "menubar.rectangle") }
                     Button { model.showClipboardSheet = true } label: { Image(systemName: "doc.on.clipboard") }
-                    Button { model.keyboardVisible.toggle() } label: {
-                        Image(systemName: model.keyboardVisible ? "keyboard.chevron.compact.down" : "keyboard")
+                    if !model.flexActive {
+                        // The laptop deck brings its own keyboard.
+                        Button { model.keyboardVisible.toggle() } label: {
+                            Image(systemName: model.keyboardVisible ? "keyboard.chevron.compact.down" : "keyboard")
+                        }
+                    }
+                    if model.posture == .partiallyOpen {
+                        // Foldable held half-open: laptop layout (video up top,
+                        // trackpad below) or plain full screen.
+                        Button { model.flexModeEnabled.toggle() } label: {
+                            Image(systemName: "laptopcomputer")
+                                .foregroundStyle(model.flexModeEnabled ? Color.accentColor : Color.primary)
+                        }
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 0) {

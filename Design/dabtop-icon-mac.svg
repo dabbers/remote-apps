@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%">
+      <stop offset="0" stop-color="#13303a"/>
+      <stop offset="0.55" stop-color="#0c161c"/>
+      <stop offset="1" stop-color="#07090d"/>
+    </radialGradient>
+    <linearGradient id="deck" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b08cff"/>
+      <stop offset="1" stop-color="#8a5cf6"/>
+    </linearGradient>
+  
+    <clipPath id="squircle"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+  </defs>
+  <g clip-path="url(#squircle)">
+    <g transform="translate(100 100) scale(0.8046875)">
+      <rect width="1024" height="1024" fill="url(#bg)"/>
+  <!-- lower half: the deck (keyboard half of the fold) -->
+  <path d="M206 652 H818 a28 28 0 0 1 26 18 L902 784 a28 28 0 0 1 -26 38 H148 a28 28 0 0 1 -26 -38 L180 670 a28 28 0 0 1 26 -18 Z" fill="url(#deck)"/>
+  <!-- upper half: the screen -->
+  <rect x="196" y="190" width="632" height="424" rx="52" fill="#eef7fb"/>
+  <!-- the one streamed window -->
+  <rect x="268" y="258" width="488" height="288" rx="30" fill="#1a1f2b"/>
+  <circle cx="312" cy="300" r="14" fill="#ff5f57"/>
+  <circle cx="356" cy="300" r="14" fill="#febc2e"/>
+  <circle cx="400" cy="300" r="14" fill="#28c840"/>
+  <path d="M268 342 H756 V516 a30 30 0 0 1 -30 30 H298 a30 30 0 0 1 -30 -30 Z" fill="#35dcf2"/>
+
+    </g>
+  </g>
+</svg>

@@ -15,11 +15,24 @@ struct StreamView: UIViewRepresentable {
         view.onInput = { [weak model] event in model?.send(event) }
         view.onToggleHUD = { [weak model] in model?.hudVisible.toggle() }
         view.onSizeChange = { [weak model] size in model?.reportStreamSize(size) }
+        view.onPostureChange = { [weak model] posture in model?.posture = posture }
+        view.onFlexChange = { [weak model] active in
+            model?.flexActive = active
+            // The deck has its own keyboard; the system one would otherwise take
+            // the flat half and push the deck up into the upright half.
+            if active { model?.keyboardVisible = false }
+        }
+        view.onMenuAction = { [weak model] path in model?.performMenu(path: path) }
+        view.onRequestMenu = { [weak model] in model?.requestMenu() }
+        view.flexModeEnabled = model.flexModeEnabled
+        view.menu = model.menu
         return view
     }
 
     func updateUIView(_ view: StreamUIView, context: Context) {
         view.hoverEnabled = model.serverFeatures.contains(ProtocolFeature.move)
+        view.flexModeEnabled = model.flexModeEnabled
+        view.menu = model.menu
         if model.keyboardVisible, !view.isFirstResponder {
             view.becomeFirstResponder()
         } else if !model.keyboardVisible, view.isFirstResponder {
@@ -44,16 +57,65 @@ struct StreamView: UIViewRepresentable {
 /// matters when the host window cannot shrink to phone size (or to fit above
 /// the keyboard): the picture is letterboxed small and the user pinches in and
 /// two-finger-pans to reach the part they need.
+///
+/// On a foldable (iPhone Duo) the view also watches the hinge. Held half-open
+/// like a laptop, it goes into a "flex" layout: the video takes
+/// the upright half and a `LaptopDeckView` (menu bar, keyboard, trackpad) the
+/// flat half, the trackpad driving a virtual cursor drawn over the video. Folding shut or opening flat returns to the
+/// full-bleed layout; the drawable area reported to the host follows, so the
+/// host window matches whichever half, or whole, screen is in use.
 final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
     var onInput: ((InputEvent) -> Void)?
     /// Called on a two-finger tap: shows or hides the on-screen controls.
     var onToggleHUD: (() -> Void)?
-    /// Called when the drawable area changes (rotation, window resize, keyboard).
+    /// Called when the drawable area changes (rotation, window resize, keyboard,
+    /// fold/unfold, or entering/leaving the flex layout).
     var onSizeChange: ((CGSize) -> Void)?
+    /// Called when a foldable's hinge changes state (never on flat devices).
+    var onPostureChange: ((DevicePosture) -> Void)?
+    /// Called when the laptop deck appears or disappears.
+    var onFlexChange: ((Bool) -> Void)?
+    /// When false, a half-open hinge keeps the plain full-screen layout.
+    var flexModeEnabled = true {
+        didSet { if flexModeEnabled != oldValue { setNeedsLayout() } }
+    }
+    /// Host menu tree for the deck's menu bar (flex layout only).
+    var menu: [MenuNode] {
+        get { deck.menu }
+        set { deck.menu = newValue }
+    }
+    var onMenuAction: (([Int]) -> Void)? {
+        get { deck.onMenuAction }
+        set { deck.onMenuAction = newValue }
+    }
+    var onRequestMenu: (() -> Void)? {
+        get { deck.onRequestMenu }
+        set { deck.onRequestMenu = newValue }
+    }
     /// True when the server accepts `move` events (PROTOCOL.md §8); pointer
     /// hover (Mac, iPad trackpad/mouse, Pencil hover) then moves the host cursor.
     var hoverEnabled = false
-    private var lastBoundsSize: CGSize = .zero
+    private var lastReportedArea: CGSize = .zero
+    private var lastLoggedBounds: CGSize = .zero
+
+    // MARK: Foldable posture
+    private var posture: DevicePosture = .unknown
+    /// The part of the view the video occupies: all of it, or the upper half in
+    /// the flex layout. Everything that maps touches or clamps zoom uses this.
+    private var videoFrame: CGRect = .zero
+    private let deck = LaptopDeckView()
+    private var trackpad: TrackpadView { deck.trackpad }
+    /// Where the trackpad's cursor points, normalized to the video.
+    private var virtualCursor = NormalizedPoint(x: 0.5, y: 0.5)
+    private let cursorView = UIView()
+    /// The hinge crosses the inner display's long axis, so a half-open device
+    /// is a portrait view (669×951 pt on the Duo) split at mid-height: the
+    /// upright half above, the flat half below. A wider-than-tall view in this
+    /// posture is the system keyboard's doing (it shrinks the view to the
+    /// upright half), not a laptop arrangement, so it never splits.
+    private var flexLayoutActive: Bool {
+        flexModeEnabled && posture == .partiallyOpen && bounds.height > bounds.width
+    }
 
     /// Hover is rate-limited to ~60/s; the newest position waits here for the
     /// next slot so the host cursor always ends where the pointer stopped.
@@ -87,6 +149,86 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
         contentView.backgroundColor = .black
         contentView.layer.addSublayer(renderer.layer)
         addSubview(contentView)
+
+        // Virtual cursor for the trackpad: a ring over the video, hidden unless
+        // the flex layout is active. Added above the video layer.
+        cursorView.bounds = CGRect(x: 0, y: 0, width: 22, height: 22)
+        cursorView.layer.cornerRadius = 11
+        cursorView.layer.borderWidth = 2
+        cursorView.layer.borderColor = UIColor.white.cgColor
+        cursorView.backgroundColor = UIColor(white: 0, alpha: 0.25)
+        cursorView.layer.shadowColor = UIColor.black.cgColor
+        cursorView.layer.shadowOpacity = 0.8
+        cursorView.layer.shadowRadius = 2
+        cursorView.layer.shadowOffset = .zero
+        cursorView.isUserInteractionEnabled = false
+        cursorView.isHidden = true
+        contentView.addSubview(cursorView)
+
+        deck.isHidden = true
+        deck.onKey = { [weak self] key in self?.onInput?(.key(key)) }
+        trackpad.onMove = { [weak self] dx, dy in self?.moveCursor(dx: dx, dy: dy) }
+        trackpad.onTap = { [weak self] in
+            guard let self else { return }
+            self.onInput?(.tap(at: self.virtualCursor, button: .left))
+        }
+        trackpad.onSecondaryTap = { [weak self] in
+            guard let self else { return }
+            self.onInput?(.longPress(at: self.virtualCursor))
+        }
+        trackpad.onScroll = { [weak self] dx, dy in self?.scrollAtCursor(dx: dx, dy: dy) }
+        trackpad.onDragBegan = { [weak self] in
+            guard let self else { return }
+            self.onInput?(.drag(at: self.virtualCursor, phase: .began))
+        }
+        trackpad.onDragMoved = { [weak self] dx, dy in
+            guard let self else { return }
+            self.moveCursor(dx: dx, dy: dy, hover: false)
+            self.onInput?(.drag(at: self.virtualCursor, phase: .moved))
+        }
+        trackpad.onDragEnded = { [weak self] in
+            guard let self else { return }
+            self.onInput?(.drag(at: self.virtualCursor, phase: .ended))
+        }
+        addSubview(deck)
+
+        var postureForced = false
+        #if DEBUG
+        // Developer aid: exercise the foldable layouts on a flat device or
+        // simulator by launching with REMOTEAPP_POSTURE=partiallyOpen (or
+        // closed / fullyOpen). The forced posture replaces hinge updates, which
+        // would otherwise report the simulator's real (flat) state over it.
+        if let fake = ProcessInfo.processInfo.environment["REMOTEAPP_POSTURE"] {
+            let forced: DevicePosture = switch fake {
+            case "closed": .closed
+            case "partiallyOpen": .partiallyOpen
+            case "fullyOpen": .fullyOpen
+            default: .unknown
+            }
+            DispatchQueue.main.async { [weak self] in self?.setPosture(forced) }
+            postureForced = true
+        }
+        #endif
+
+        if !postureForced, #available(iOS 27.1, *) {
+            let hinge = UIHingeInteraction { [weak self] _, update in
+                NSLog("RemoteApp hinge update: %@",
+                      update.hinge.map { "status=\($0.status.rawValue) angle=\($0.angle)" } ?? "nil (no hinge for this hierarchy)")
+                // A nil hinge means this hierarchy gets no hinge updates right now
+                // (iOS hands them out only in some arrangements, e.g. while the
+                // system keyboard holds the flat half); the device did not change,
+                // so keep the last posture rather than falling back to flat.
+                guard let hinge = update.hinge else { return }
+                let posture: DevicePosture = switch hinge.status {
+                case .closed: .closed
+                case .partiallyOpen: .partiallyOpen
+                case .fullyOpen: .fullyOpen
+                @unknown default: .unknown
+                }
+                self?.setPosture(posture)
+            }
+            addInteraction(hinge)
+        }
 
         // One finger → remote input.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
@@ -123,31 +265,56 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        if bounds.size != lastBoundsSize {
-            lastBoundsSize = bounds.size
-            onSizeChange?(bounds.size)
+        let flex = flexLayoutActive
+        // The hinge of a half-open foldable runs across the middle of the long
+        // axis; the video stays on the upright (upper) half, the deck lies flat.
+        videoFrame = flex
+            ? CGRect(x: 0, y: 0, width: bounds.width, height: floor(bounds.height / 2))
+            : bounds
+        if deck.isHidden == flex {
+            deck.isHidden = !flex
+            if flex { onRequestMenu?() }
+            onFlexChange?(flex)
         }
-        // Content view fills the view at 1x, then the zoom/pan transform is applied.
+        if bounds.size != lastLoggedBounds {
+            lastLoggedBounds = bounds.size
+            NSLog("RemoteApp stream view %.0f×%.0f posture=%@ flex=%d", bounds.width, bounds.height, "\(posture)", flex ? 1 : 0)
+        }
+        deck.frame = CGRect(x: 0, y: videoFrame.maxY, width: bounds.width, height: bounds.height - videoFrame.maxY)
+        cursorView.isHidden = !flex
+        if videoFrame.size != lastReportedArea {
+            lastReportedArea = videoFrame.size
+            onSizeChange?(videoFrame.size)
+        }
+        // Content view fills the video area at 1x, then the zoom/pan transform is applied.
         contentView.transform = .identity
-        contentView.bounds = CGRect(origin: .zero, size: bounds.size)
-        contentView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        contentView.bounds = CGRect(origin: .zero, size: videoFrame.size)
+        contentView.center = CGPoint(x: videoFrame.midX, y: videoFrame.midY)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         renderer.layer.frame = contentView.bounds
         CATransaction.commit()
+        positionCursor()
         applyTransform()
+    }
+
+    private func setPosture(_ new: DevicePosture) {
+        guard new != posture else { return }
+        posture = new
+        onPostureChange?(new)
+        setNeedsLayout()
     }
 
     private func applyTransform() {
         clampOffset()
         contentView.transform = CGAffineTransform(scaleX: zoomScale, y: zoomScale)
-        contentView.center = CGPoint(x: bounds.midX + panOffset.x, y: bounds.midY + panOffset.y)
+        contentView.center = CGPoint(x: videoFrame.midX + panOffset.x, y: videoFrame.midY + panOffset.y)
     }
 
     /// Keeps the scaled content covering the viewport so panning never reveals black.
     private func clampOffset() {
-        let maxX = max(0, (zoomScale - 1) * bounds.width / 2)
-        let maxY = max(0, (zoomScale - 1) * bounds.height / 2)
+        let maxX = max(0, (zoomScale - 1) * videoFrame.width / 2)
+        let maxY = max(0, (zoomScale - 1) * videoFrame.height / 2)
         panOffset.x = min(max(panOffset.x, -maxX), maxX)
         panOffset.y = min(max(panOffset.y, -maxY), maxY)
         if zoomScale <= 1 { panOffset = .zero }
@@ -174,7 +341,39 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
 
     @objc private func handleTap(_ g: UITapGestureRecognizer) {
         guard let p = normalized(g.location(in: contentView)) else { return }
+        // A direct tap on the video also parks the trackpad cursor there.
+        virtualCursor = p
+        positionCursor()
         onInput?(.tap(at: p, button: .left))
+    }
+
+    // MARK: Trackpad (flex layout) → virtual cursor
+
+    /// Trackpad points → video points (the pad is as wide as the video, so a
+    /// finger across the pad crosses the picture; a little gain makes it feel
+    /// like a laptop pad rather than a 1:1 slate). Hover-moves the host cursor
+    /// when the server supports it; clicks always land at the cursor.
+    private func moveCursor(dx: CGFloat, dy: CGFloat, hover: Bool = true) {
+        let rect = videoRect
+        guard rect.width > 0, rect.height > 0 else { return }
+        let gain: CGFloat = 1.4 / zoomScale
+        virtualCursor = NormalizedPoint(x: min(max(virtualCursor.x + Double(dx * gain / rect.width), 0), 1),
+                                        y: min(max(virtualCursor.y + Double(dy * gain / rect.height), 0), 1))
+        positionCursor()
+        if hover, hoverEnabled { queueHover(virtualCursor) }
+    }
+
+    private func scrollAtCursor(dx: CGFloat, dy: CGFloat) {
+        guard dx != 0 || dy != 0 else { return }
+        let scale = videoRect.width > 0 ? contentView.bounds.width / videoRect.width : 1
+        onInput?(.scroll(at: virtualCursor, dx: dx * scale, dy: dy * scale))
+    }
+
+    private func positionCursor() {
+        guard !cursorView.isHidden else { return }
+        let rect = videoRect
+        cursorView.center = CGPoint(x: rect.minX + rect.width * virtualCursor.x,
+                                    y: rect.minY + rect.height * virtualCursor.y)
     }
 
     @objc private func handleLongPress(_ g: UILongPressGestureRecognizer) {
@@ -251,7 +450,7 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
         case .changed:
             let newScale = min(max(pinchStartScale * g.scale, 1), maxZoom)
             // Keep the point under the pinch fixed on screen as it scales.
-            let anchorRel = CGPoint(x: pinchAnchor.x - bounds.midX, y: pinchAnchor.y - bounds.midY)
+            let anchorRel = CGPoint(x: pinchAnchor.x - videoFrame.midX, y: pinchAnchor.y - videoFrame.midY)
             let ratio = newScale / pinchStartScale
             panOffset = CGPoint(x: anchorRel.x - (anchorRel.x - pinchStartOffset.x) * ratio,
                                 y: anchorRel.y - (anchorRel.y - pinchStartOffset.y) * ratio)
@@ -276,6 +475,13 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
         default:
             break
         }
+    }
+
+    /// Touches on the deck belong to it alone; a superview's recognizers would
+    /// otherwise see them too and treat a two-finger tap as "toggle HUD".
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard let view = touch.view else { return true }
+        return !view.isDescendant(of: deck)
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {

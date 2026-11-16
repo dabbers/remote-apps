@@ -24,6 +24,7 @@ targets:
     platform: macOS
     sources:
       - path: Server/Sources
+      - path: Server/Assets.xcassets
     dependencies:
       - package: RemoteAppProtocol
     entitlements:
@@ -43,6 +44,7 @@ targets:
     supportedDestinations: [iOS, macCatalyst]
     sources:
       - path: Client/Sources
+      - path: Client/Assets.xcassets
     dependencies:
       - package: RemoteAppProtocol
     entitlements:

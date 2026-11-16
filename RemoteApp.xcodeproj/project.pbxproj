@@ -18,12 +18,16 @@
 		39C8A035383776EA9540BCE2 /* VideoRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3367F76DDDAF9626B0758F6F /* VideoRenderer.swift */; };
 		3F146C285ADE0524E402A910 /* Discovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE167BA201EC33D48EFFFAC1 /* Discovery.swift */; };
 		553A41A689B05077D3C19091 /* ClientSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45E2D57C2AFF812C8937EF33 /* ClientSession.swift */; };
+		608D77772C20D9C516C66639 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FCAEF5BC40DDA1BD20456C39 /* Assets.xcassets */; };
 		6307940A8929F72F661D4C5B /* Auth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31EF490DB10514E76D81AB02 /* Auth.swift */; };
 		640FDF488D2A38C3DBF8A257 /* ClipboardBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14C61260C315DD1D949CA773 /* ClipboardBridge.swift */; };
 		670AF71256A39B03C7B54D5D /* RemoteAppProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 23D8DE8882C798B9BE8E344A /* RemoteAppProtocol */; };
+		8ED4BB204F2D8E0C0565E74B /* TrackpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B9F2133433A21B1E5FD4B82 /* TrackpadView.swift */; };
 		91F1ECD8C8C9241E16795CA9 /* InputInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C89DC216DA0D109B8E1CDFA /* InputInjector.swift */; };
 		9A04859A566568B285AD129C /* MacMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 419C26293F5A9A3A987E7CA7 /* MacMenu.swift */; };
+		AAD2A809D9F4F5DB8933E7E7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F831EC6C673A274DAB8C20FD /* Assets.xcassets */; };
 		AD49B9C7A3F6778081086F93 /* ServerIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F64067EFEB6492F985E5ECBB /* ServerIdentity.swift */; };
+		B9122FD599EF07FB66C5534C /* LaptopDeckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF5CFCEED3455E2A8C5A484C /* LaptopDeckView.swift */; };
 		BB5ADF4616DF85D1A646CD81 /* TailscaleInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */; };
 		C88187C57C6208EE9DCC7F5C /* WindowCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E6E8C4E48222FDC6CA707C5 /* WindowCapture.swift */; };
 		CF8A6B9E9E49B47D0BAE6F98 /* RemoteAppClientApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 231C7B8E91B769B8EA888D16 /* RemoteAppClientApp.swift */; };
@@ -43,6 +47,7 @@
 		3367F76DDDAF9626B0758F6F /* VideoRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoRenderer.swift; sourceTree = "<group>"; };
 		3508150C28D206C7B9CDFDEB /* ServerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerModel.swift; sourceTree = "<group>"; };
 		37756DA6723350EA2607DF31 /* H264Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = H264Encoder.swift; sourceTree = "<group>"; };
+		3B9F2133433A21B1E5FD4B82 /* TrackpadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackpadView.swift; sourceTree = "<group>"; };
 		3E6E8C4E48222FDC6CA707C5 /* WindowCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowCapture.swift; sourceTree = "<group>"; };
 		419C26293F5A9A3A987E7CA7 /* MacMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMenu.swift; sourceTree = "<group>"; };
 		45E2D57C2AFF812C8937EF33 /* ClientSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientSession.swift; sourceTree = "<group>"; };
@@ -54,6 +59,7 @@
 		A7E18DD6AA348A244BA4779B /* RemoteAppClient.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RemoteAppClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		ABD48B4C5E2D4883C1FD75FB /* TailscaleInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailscaleInfo.swift; sourceTree = "<group>"; };
 		AE167BA201EC33D48EFFFAC1 /* Discovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Discovery.swift; sourceTree = "<group>"; };
+		BF5CFCEED3455E2A8C5A484C /* LaptopDeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaptopDeckView.swift; sourceTree = "<group>"; };
 		C43B9CD7A6BA48A50CE03DD3 /* RemoteAppServer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RemoteAppServer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E2664C6C345B0B78205068A5 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		E583EA1846D8A25FCB26247D /* ClientModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientModel.swift; sourceTree = "<group>"; };
@@ -62,6 +68,8 @@
 		EDA25B7B9CE345EBCE8920EA /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		F18F8002C07509952FC839A0 /* StreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamView.swift; sourceTree = "<group>"; };
 		F64067EFEB6492F985E5ECBB /* ServerIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerIdentity.swift; sourceTree = "<group>"; };
+		F831EC6C673A274DAB8C20FD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		FCAEF5BC40DDA1BD20456C39 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		FD3E88CDFC2529945BF2F739 /* RemoteAppProtocol */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RemoteAppProtocol; path = RemoteAppProtocol; sourceTree = SOURCE_ROOT; };
 		FFF786761B415FD819DDC4BC /* WindowControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowControl.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -114,6 +122,7 @@
 		AD3104EAF7ACAB8E06A81445 /* Server */ = {
 			isa = PBXGroup;
 			children = (
+				F831EC6C673A274DAB8C20FD /* Assets.xcassets */,
 				BBC38C7212EF94CB17E77F96 /* Sources */,
 			);
 			path = Server;
@@ -136,9 +145,11 @@
 				E583EA1846D8A25FCB26247D /* ClientModel.swift */,
 				A0522F9F8857D9F6490A3BC1 /* Clipboard.swift */,
 				AE167BA201EC33D48EFFFAC1 /* Discovery.swift */,
+				BF5CFCEED3455E2A8C5A484C /* LaptopDeckView.swift */,
 				419C26293F5A9A3A987E7CA7 /* MacMenu.swift */,
 				231C7B8E91B769B8EA888D16 /* RemoteAppClientApp.swift */,
 				F18F8002C07509952FC839A0 /* StreamView.swift */,
+				3B9F2133433A21B1E5FD4B82 /* TrackpadView.swift */,
 				3367F76DDDAF9626B0758F6F /* VideoRenderer.swift */,
 				1B98A4ECDEDB91F689782191 /* Views.swift */,
 			);
@@ -171,6 +182,7 @@
 		CCC261C24716B31455624ABE /* Client */ = {
 			isa = PBXGroup;
 			children = (
+				FCAEF5BC40DDA1BD20456C39 /* Assets.xcassets */,
 				BB071C1D3FB3F75F5A04736F /* Sources */,
 			);
 			path = Client;
@@ -184,6 +196,7 @@
 			buildConfigurationList = 5C5D2DCB7B3B3A4D691A8238 /* Build configuration list for PBXNativeTarget "RemoteAppClient" */;
 			buildPhases = (
 				F3D8F4C30C449A7E6A79CF0B /* Sources */,
+				21948DA81349522D336F46AE /* Resources */,
 				A4D233A31D0396B1D6368C93 /* Frameworks */,
 			);
 			buildRules = (
@@ -203,6 +216,7 @@
 			buildConfigurationList = 2B42B31809B5DFD6E8139B63 /* Build configuration list for PBXNativeTarget "RemoteAppServer" */;
 			buildPhases = (
 				2A35D08DAD5709E3C97A29E5 /* Sources */,
+				A2A0154D83F0EF4C65E5704D /* Resources */,
 				6B5F99410D06976C4D3B015F /* Frameworks */,
 			);
 			buildRules = (
@@ -259,6 +273,25 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		21948DA81349522D336F46AE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				608D77772C20D9C516C66639 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A2A0154D83F0EF4C65E5704D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AAD2A809D9F4F5DB8933E7E7 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		2A35D08DAD5709E3C97A29E5 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -290,9 +323,11 @@
 				F5993C8EE4676D20A95EAB4C /* ClientModel.swift in Sources */,
 				E50A505A71FB5DEC792C2AFE /* Clipboard.swift in Sources */,
 				3F146C285ADE0524E402A910 /* Discovery.swift in Sources */,
+				B9122FD599EF07FB66C5534C /* LaptopDeckView.swift in Sources */,
 				9A04859A566568B285AD129C /* MacMenu.swift in Sources */,
 				CF8A6B9E9E49B47D0BAE6F98 /* RemoteAppClientApp.swift in Sources */,
 				FC4450BE7E0B9CC6F6AF22FE /* StreamView.swift in Sources */,
+				8ED4BB204F2D8E0C0565E74B /* TrackpadView.swift in Sources */,
 				39C8A035383776EA9540BCE2 /* VideoRenderer.swift in Sources */,
 				289208E6AB601126F1E709B9 /* Views.swift in Sources */,
 			);
