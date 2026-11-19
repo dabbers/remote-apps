@@ -27,6 +27,7 @@ internal sealed unsafe class FramePipeline : IDisposable
     public event Action<VideoConfig>? ConfigChanged;
     public event Action<VideoFrame>? FrameEncoded;
     public event Action<string>? Error;
+    public event Action<string>? Log;
 
     // Timing: capture wall-clock → encoded frame handed to the connection.
     private long _encodedFrames;
@@ -133,6 +134,7 @@ internal sealed unsafe class FramePipeline : IDisposable
         _capture = new DesktopCapture(gpu, monitor, bounds);
         _capture.FrameCaptured += OnFrame;
         _capture.Error += line => Error?.Invoke(line);
+        _capture.Log += line => Log?.Invoke(line);
     }
 
     public void Start()

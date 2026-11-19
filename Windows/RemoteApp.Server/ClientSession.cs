@@ -285,6 +285,7 @@ internal sealed class ClientSession
             Emit(line);
             Send(new ErrorMessage(line));
         };
+        pipeline.Log += Emit;
         _pipeline = pipeline;
         _statStart = Environment.TickCount64;
         pipeline.Start();
