@@ -71,6 +71,12 @@ struct TailscaleInfo {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
+        // The GUI app's binary only acts as the CLI when it thinks a shell
+        // started it (it looks at SHLVL). Launched from Finder or a login
+        // launch agent there is no shell, so ask for CLI mode explicitly.
+        var environment = ProcessInfo.processInfo.environment
+        environment["TAILSCALE_BE_CLI"] = "1"
+        process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
