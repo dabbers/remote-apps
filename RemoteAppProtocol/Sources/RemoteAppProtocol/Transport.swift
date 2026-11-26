@@ -42,6 +42,7 @@ public enum Transport {
             sec_protocol_options_add_tls_application_protocol(tls.securityProtocolOptions, alpnProtocol)
             let tcp = NWProtocolTCP.Options()
             tcp.noDelay = true
+            enableKeepalive(tcp)
             let params = NWParameters(tls: tls, tcp: tcp)
             params.includePeerToPeer = true
             return params
@@ -71,10 +72,22 @@ public enum Transport {
             }, queue)
             let tcp = NWProtocolTCP.Options()
             tcp.noDelay = true
+            tcp.connectionTimeout = 10
+            enableKeepalive(tcp)
             let params = NWParameters(tls: tls, tcp: tcp)
             params.includePeerToPeer = true
             return params
         }
+    }
+
+    /// Backstop for a peer that vanished without closing (a suspended phone, a
+    /// dropped tunnel): the kernel probes an idle connection and fails it after
+    /// about 25 s. The ping/pong check above the transport usually fires first.
+    private static func enableKeepalive(_ tcp: NWProtocolTCP.Options) {
+        tcp.enableKeepalive = true
+        tcp.keepaliveIdle = 10
+        tcp.keepaliveInterval = 5
+        tcp.keepaliveCount = 3
     }
 
     /// Loads a PKCS#12 blob (e.g. a bundled self-signed dev certificate).

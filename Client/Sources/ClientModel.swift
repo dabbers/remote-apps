@@ -96,9 +96,37 @@ final class ClientModel: ObservableObject {
     private var lastPublish = Date()
     private var keepalive: Timer?
 
+    // MARK: Reconnect state
+    /// True while a dropped session is being re-established; the UI shows a
+    /// banner over whatever was on screen instead of an error.
+    @Published var reconnecting = false
+    /// Where to land after an automatic reconnect.
+    private enum ResumeTarget {
+        case apps
+        /// `pid` is 0 for an app opened by bundle id, whose pid we never learn.
+        case app(pid: Int32, bundleIdentifier: String)
+    }
+    /// Set once a session is up; nil means there is nothing to resume.
+    private var resumeTarget: ResumeTarget?
+    private var reconnectAttempt = 0
+    private var reconnectWork: DispatchWorkItem?
+    private var connectTimeout: DispatchWorkItem?
+    /// The connection was dropped while in the background; redial on return.
+    private var resumeOnForeground = false
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var lifecycleObservers: [NSObjectProtocol] = []
+    /// When the Mac was last heard from (any message, video included).
+    private let inbound = ActivityClock()
+    /// Delays before each redial; about 16 s in all before giving up.
+    private static let reconnectDelays: [TimeInterval] = [0.2, 1, 2, 3, 5, 5]
+    /// The Mac answers a ping within a round trip; this much silence means the
+    /// connection is dead even though the socket has not said so.
+    private static let silenceLimit: TimeInterval = 12
+
     init() {
         discovery.onUpdate = { [weak self] servers in self?.servers = servers }
         discovery.start(kind: transport)
+        observeLifecycle()
     }
 
     // MARK: Responsive sizing
@@ -192,25 +220,45 @@ final class ClientModel: ObservableObject {
     }
 
     private func connect(to server: Discovery.Server, credential: String, token: String?) {
-        phase = .connecting(server.name)
+        // A redial keeps the current screen under the "Reconnecting" banner.
+        if !reconnecting { phase = .connecting(server.name) }
+        // Never leave an earlier connection behind: its late callbacks are
+        // ignored below, and the Mac sees it close rather than linger.
+        connection?.cancel()
+        connectTimeout?.cancel()
         let nw = NWConnection(to: server.endpoint, using: Transport.clientParameters(kind: transport))
         let conn = MessageConnection(connection: nw)
         conn.onStateChange = { [weak self] state in
             NSLog("RemoteApp connection state: %@", "\(state)")
             Task { @MainActor in
-                guard let self else { return }
+                // Only the current connection may change the model.
+                guard let self, self.connection === conn else { return }
                 switch state {
                 case .ready:
+                    self.connectTimeout?.cancel()
+                    self.inbound.touch()
                     self.sendHello(code: credential, token: token)
-                case .failed(let error):
-                    self.fail("Connection failed: \(error.localizedDescription)")
                 case .waiting(let error):
-                    self.phase = .connecting("\(server.name) (waiting: \(error.localizedDescription))")
+                    // `.failed` needs no case: it arrives through `onClose`.
+                    if !self.reconnecting {
+                        self.phase = .connecting("\(server.name) (waiting: \(error.localizedDescription))")
+                    }
                 default: break
                 }
             }
         }
+        // A connection stuck in `.waiting` (tunnel still coming up) never fails
+        // by itself; give up on it so the retry logic can dial again.
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.connection === conn else { return }
+            self.connection = nil
+            conn.cancel()
+            self.connectionLost("timed out connecting to \(server.name)")
+        }
+        connectTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeout)
         conn.onMessage = { [weak self] message in
+            self?.inbound.touch()
             // Video, and the configuration it decodes under, go straight to the
             // renderer off the main thread, in arrival order. A config that took
             // the main-actor hop with the other messages could land after the
@@ -234,8 +282,7 @@ final class ClientModel: ObservableObject {
             Task { @MainActor in
                 guard let self, self.connection === conn else { return }
                 self.connection = nil
-                if case .browsing = self.phase { return }
-                self.fail(error.map { "Disconnected: \($0.localizedDescription)" } ?? "Disconnected")
+                self.connectionLost(error?.localizedDescription)
             }
         }
         connection = conn
@@ -244,10 +291,156 @@ final class ClientModel: ObservableObject {
 
     /// QUIC drops idle connections (30 s); keep it warm while no video flows.
     /// Started only after the server accepted our hello so no ping precedes it.
+    /// The same timer notices a dead connection: the Mac answers every ping,
+    /// so a long silence means it is gone and the session is redialled.
     private func startKeepalive() {
         keepalive?.invalidate()
+        inbound.touch()
         keepalive = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            self?.connection?.send(.ping(UInt64(Date().timeIntervalSince1970 * 1000)))
+            MainActor.assumeIsolated {
+                guard let self, let conn = self.connection else { return }
+                if self.inbound.age > Self.silenceLimit {
+                    self.connection = nil
+                    conn.cancel()
+                    self.connectionLost("the Mac stopped answering")
+                    return
+                }
+                conn.send(.ping(UInt64(Date().timeIntervalSince1970 * 1000)))
+            }
+        }
+    }
+
+    // MARK: Reconnecting
+
+    /// The connection ended without the user asking. An established session is
+    /// redialled; a first connection that never got going reports the error.
+    private func connectionLost(_ reason: String?) {
+        keepalive?.invalidate()
+        connectTimeout?.cancel()
+        guard resumeTarget != nil, pendingServer != nil else {
+            if case .browsing = phase { return }
+            fail(reason.map { "Disconnected: \($0)" } ?? "Disconnected")
+            return
+        }
+        NSLog("RemoteApp connection lost (%@); reconnecting", reason ?? "closed")
+        scheduleReconnect(lastError: reason)
+    }
+
+    private func scheduleReconnect(lastError: String?) {
+        guard let server = pendingServer else { return }
+        reconnecting = true
+        // iOS gives a backgrounded app no network time worth dialling in:
+        // wait for the user to come back.
+        if UIApplication.shared.applicationState == .background {
+            resumeOnForeground = true
+            return
+        }
+        guard reconnectAttempt < Self.reconnectDelays.count else {
+            fail("Lost the connection to \(server.name)" + (lastError.map { ": \($0)" } ?? ""))
+            return
+        }
+        let delay = Self.reconnectDelays[reconnectAttempt]
+        reconnectAttempt += 1
+        reconnectWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.reconnecting, self.connection == nil else { return }
+            self.connect(to: server, credential: "", token: self.savedToken(for: server.name))
+        }
+        reconnectWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Back to a clean slate once a session is up, or abandoned.
+    private func clearReconnectState() {
+        reconnecting = false
+        reconnectAttempt = 0
+        resumeOnForeground = false
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        connectTimeout?.cancel()
+        connectTimeout = nil
+    }
+
+    // MARK: App lifecycle
+
+    private func observeLifecycle() {
+        let center = NotificationCenter.default
+        lifecycleObservers = [
+            center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.didEnterBackground() }
+            },
+            center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.willEnterForeground() }
+            },
+        ]
+    }
+
+    /// Switching apps suspends this one within seconds, which silently kills
+    /// the socket. Ask iOS for its background grace period (about 30 s) so a
+    /// quick switch keeps the session; when that runs out, hang up properly so
+    /// the Mac frees the app at once instead of holding a dead session.
+    private func didEnterBackground() {
+        guard connection != nil, isConnected, backgroundTask == .invalid else { return }
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "dabtop session") { [weak self] in
+            MainActor.assumeIsolated { self?.hangUpForBackground() }
+        }
+    }
+
+    private func hangUpForBackground() {
+        keepalive?.invalidate()
+        if let conn = connection {
+            connection = nil
+            conn.cancel()
+        }
+        if resumeTarget != nil {
+            reconnecting = true
+            resumeOnForeground = true
+        }
+        endBackgroundTask()
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+    }
+
+    private func willEnterForeground() {
+        endBackgroundTask()
+        if resumeOnForeground || (reconnecting && connection == nil) {
+            resumeOnForeground = false
+            reconnectAttempt = 0
+            scheduleReconnect(lastError: nil)
+            return
+        }
+        guard let conn = connection, isConnected else { return }
+        // The session survived the switch, or looks as if it did: make sure the
+        // Mac still answers before trusting it.
+        let asked = Date()
+        conn.send(.ping(UInt64(asked.timeIntervalSince1970 * 1000)))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.connection === conn else { return }
+            if self.inbound.last < asked {
+                self.connection = nil
+                conn.cancel()
+                self.connectionLost("no answer after returning to the app")
+            } else if case .streaming = self.phase {
+                // The decoder was flushed in the background and a still window
+                // sends no frames: restart the stream for a fresh keyframe.
+                self.restartStream()
+            }
+        }
+    }
+
+    /// Asks the Mac to start the current app's stream again.
+    private func restartStream() {
+        guard case .app(let pid, let bundleIdentifier)? = resumeTarget else { return }
+        renderer.reset()
+        lastReportedSize = .zero
+        if pid != 0 {
+            connection?.send(.selectApp(SelectApp(pid: pid)))
+        } else {
+            connection?.send(.launchApp(bundleIdentifier: bundleIdentifier))
         }
     }
 
@@ -258,6 +451,9 @@ final class ClientModel: ObservableObject {
 
     func disconnect() {
         keepalive?.invalidate()
+        clearReconnectState()
+        resumeTarget = nil
+        endBackgroundTask()
         connection?.cancel()
         connection = nil
         renderer.reset()
@@ -270,6 +466,8 @@ final class ClientModel: ObservableObject {
     private func fail(_ message: String) {
         errorMessage = message
         keepalive?.invalidate()
+        clearReconnectState()
+        resumeTarget = nil
         connection?.cancel()
         connection = nil
         renderer.reset()
@@ -289,6 +487,7 @@ final class ClientModel: ObservableObject {
         menu = []
         latencyEMA = nil
         lastReportedSize = .zero
+        resumeTarget = .app(pid: app.pid, bundleIdentifier: app.bundleIdentifier)
         connection?.send(.selectApp(SelectApp(pid: app.pid)))
         phase = .streaming
     }
@@ -303,12 +502,14 @@ final class ClientModel: ObservableObject {
         menu = []
         latencyEMA = nil
         lastReportedSize = .zero
+        resumeTarget = .app(pid: 0, bundleIdentifier: app.bundleIdentifier)
         connection?.send(.launchApp(bundleIdentifier: app.bundleIdentifier))
         phase = .streaming
     }
 
     func backToApps() {
         keyboardVisible = false
+        resumeTarget = .apps
         phase = .apps
     }
 
@@ -358,11 +559,28 @@ final class ClientModel: ObservableObject {
             serverName = ack.serverName
             serverFeatures = ack.supportedFeatures
             apps = ack.apps
-            phase = .apps
             // Remember this device for next time so the code is not needed again.
             if let issued = ack.issuedToken, let key = pendingServer?.name { saveToken(issued, for: key) }
+            // After a reconnect, go back to the app that was on screen. Its pid
+            // is unchanged unless it was relaunched; then match the bundle id.
+            let resuming = reconnecting ? resumeTarget : nil
+            clearReconnectState()
             startKeepalive()
+            if case .app(let pid, let bundleIdentifier)? = resuming {
+                if let app = ack.apps.first(where: { $0.pid == pid && pid != 0 })
+                    ?? ack.apps.first(where: { $0.bundleIdentifier == bundleIdentifier && !bundleIdentifier.isEmpty }) {
+                    select(app)
+                } else {
+                    resumeTarget = .apps
+                    phase = .apps
+                }
+            } else {
+                resumeTarget = .apps
+                phase = .apps
+            }
         case .authFailed(let reason):
+            clearReconnectState()
+            resumeTarget = nil
             // A rejected token is stale (the Mac forgot this device): drop it and
             // ask for the code again.
             if let key = pendingServer?.name { clearToken(for: key) }

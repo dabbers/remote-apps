@@ -24,6 +24,10 @@ protocol SessionCoordinator: AnyObject {
     /// A session started (`pid`) or stopped (`nil`) streaming; refresh the app
     /// list on this device's other sessions so their `streamed` flags update.
     func sessionStreaming(_ sessionID: UUID, deviceID: String, pid: pid_t?)
+    /// `pid` is held by another session. If that session belongs to the same
+    /// device and no longer answers (the phone was suspended and came back on a
+    /// new connection), close it and free the app. True when the app is free.
+    func reclaim(pid: pid_t, for sessionID: UUID, deviceID: String) async -> Bool
 }
 
 /// One connected client: auth, app selection, capture → encode → send, input.
@@ -73,6 +77,13 @@ final class ClientSession {
     private var restartAttempts = 0
     private let maxRestartAttempts = 12
 
+    /// When the client was last heard from, and the timer that pings it.
+    private let activity = ActivityClock()
+    private var livenessTimer: DispatchSourceTimer?
+    /// A client answers a ping within a round trip; this much silence means it
+    /// is gone (suspended, or the tunnel dropped) even if the socket looks open.
+    private let silenceLimit: TimeInterval = 20
+
     private var inFlight = 0
     private let maxInFlight = 4
     private var statFrames = 0
@@ -94,6 +105,8 @@ final class ClientSession {
         }
         connection.onClose = { [weak self] error in
             self?.log("connection closed\(error.map { ": \($0)" } ?? "")")
+            self?.livenessTimer?.cancel()
+            self?.livenessTimer = nil
             self?.teardown()
             self?.onClose?()
         }
@@ -110,9 +123,45 @@ final class ClientSession {
         connection.send(control)
     }
 
+    // MARK: Liveness
+
+    /// Pings the client every 5 s and closes the session once it has been
+    /// silent for `silenceLimit`. Without this a client that disappears without
+    /// a FIN keeps its session, and the app it was streaming, indefinitely.
+    private func startLiveness() {
+        livenessTimer?.cancel()
+        activity.touch()
+        let timer = DispatchSource.makeTimerSource(queue: connection.queue)
+        timer.schedule(deadline: .now() + 5, repeating: 5)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            if self.activity.age > self.silenceLimit {
+                self.log("no traffic for \(Int(self.silenceLimit)) s; closing the session")
+                self.close()
+                return
+            }
+            self.send(.ping(UInt64(Date().timeIntervalSince1970 * 1000)))
+        }
+        timer.resume()
+        livenessTimer = timer
+    }
+
+    /// Pings the client and reports whether anything came back in time.
+    func isResponsive(within timeout: TimeInterval) async -> Bool {
+        let asked = Date()
+        send(.ping(UInt64(asked.timeIntervalSince1970 * 1000)))
+        let deadline = asked.addingTimeInterval(timeout)
+        while Date() < deadline {
+            if activity.last > asked { return true }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return activity.last > asked
+    }
+
     // MARK: Message handling
 
     private func handle(_ message: Message) {
+        activity.touch()
         switch message {
         case .control(let control):
             handleControl(control)
@@ -140,6 +189,7 @@ final class ClientSession {
                 deviceID = hello.deviceID
                 isAuthenticated = true
                 onAuthenticated?()
+                startLiveness()
                 clientScreen = hello.screen
                 log("authenticated by remembered pairing (\(hello.clientName))")
                 Task { await self.sendAppList(asHelloAck: true, issuedToken: nil) }
@@ -153,6 +203,7 @@ final class ClientSession {
             deviceID = hello.deviceID
             isAuthenticated = true
             onAuthenticated?()
+            startLiveness()
             clientScreen = hello.screen
             // First pairing with the code: mint a token so this device is remembered.
             let issued = pairingStore.issue(deviceID: hello.deviceID, name: hello.clientName)
@@ -288,12 +339,24 @@ final class ClientSession {
         // One session per app (PROTOCOL.md §13): refuse an app another live
         // session is streaming and keep this session where it is, so two
         // sessions never fight over moving/resizing the same window.
-        if await coordinator?.streamedPIDs(excluding: id).contains(pid) == true {
+        // The exception is this device's own earlier session that has stopped
+        // answering: a phone that was suspended reconnects on a new connection
+        // while the old one still looks open here. That one is closed instead.
+        if await coordinator?.streamedPIDs(excluding: id).contains(pid) == true,
+           await coordinator?.reclaim(pid: pid, for: id, deviceID: deviceID) != true {
             send(.error(message: "already streamed"))
             log("refused app \(pid): already streamed by another session")
             return
         }
         teardown()
+        // Windows cannot be read or captured while the display is asleep.
+        await DisplayPower.wakeAndWait()
+        // Nor while the screen is locked, and only the user can undo that.
+        guard !DisplayPower.isScreenLocked else {
+            log("refused app \(pid): the screen is locked")
+            send(.error(message: DisplayPower.lockedMessage))
+            return
+        }
         do {
             let snapshot = try await ShareableApps.fetch()
             guard let scApp = snapshot.content.applications.first(where: { $0.processID == pid }) else {
@@ -301,6 +364,7 @@ final class ClientSession {
                 return
             }
             guard let axWindow = WindowControl.mainWindow(pid: pid) else {
+                log("\(scApp.applicationName): no main window (\(WindowControl.windowDiagnosis(pid: pid)))")
                 send(.error(message: "no main window for \(scApp.applicationName) (Accessibility permission missing?)"))
                 return
             }
@@ -313,6 +377,7 @@ final class ClientSession {
             let origin = WindowControl.contentOrigin(displayID: await VirtualDisplayManager.shared.ready())
             let requested = CGSize(width: clientScreen.width, height: clientScreen.height)
             guard let frame = WindowControl.setFrame(axWindow, origin: origin, size: requested) else {
+                log("\(scApp.applicationName): could not read window frame (\(WindowControl.frameFailure(of: axWindow)))")
                 send(.error(message: "could not read window frame"))
                 return
             }

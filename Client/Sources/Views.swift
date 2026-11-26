@@ -22,6 +22,23 @@ struct RootView: View {
             }
         }
         .animation(.default, value: model.phase)
+        .overlay(alignment: .top) {
+            // A dropped session is redialled in place; say so over whatever is showing.
+            if model.reconnecting {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Reconnecting…")
+                    Button("Cancel") { model.disconnect() }
+                        .buttonStyle(.bordered)
+                }
+                .font(.callout)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.regularMaterial, in: Capsule())
+                .padding(.top, 8)
+            }
+        }
+        .animation(.default, value: model.reconnecting)
         .alert("Error", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
