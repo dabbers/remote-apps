@@ -4,6 +4,7 @@
 import AVFoundation
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 import RemoteAppProtocol
 
 /// Full-screen video with gesture → input mapping and keyboard capture.
@@ -139,6 +140,9 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
     private var pinchAnchor: CGPoint = .zero
     private var panStartOffset: CGPoint = .zero
     private var lastScrollPoint: CGPoint = .zero
+    /// The tap-then-hold recognizer, and when the last drag position was sent.
+    private let tapHoldDrag = TapHoldDragRecognizer()
+    private var lastDragSend: CFTimeInterval = 0
 
     init(renderer: VideoRenderer) {
         self.renderer = renderer
@@ -240,6 +244,14 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
         scroll.minimumNumberOfTouches = 1
         scroll.maximumNumberOfTouches = 1
 
+        // Tap, then touch again and hold or move → left-button drag (select
+        // text, move a slider, drag a window), like tap-and-a-half on a
+        // trackpad. It fails the instant a touch is not preceded by a tap, so
+        // making scroll and long press wait for it costs them nothing.
+        tapHoldDrag.addTarget(self, action: #selector(handleTapHoldDrag))
+        longPress.require(toFail: tapHoldDrag)
+        scroll.require(toFail: tapHoldDrag)
+
         // Two fingers → zoom/pan the local picture, or tap to toggle the HUD.
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
         let twoFingerPan = UIPanGestureRecognizer(target: self, action: #selector(handleZoomPan))
@@ -251,7 +263,7 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
         // A pointer (Mac, iPad trackpad/mouse, Pencil hover) → host cursor follows.
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover))
 
-        for g in [tap, longPress, scroll, pinch, twoFingerPan, twoFingerTap, hover] {
+        for g in [tap, longPress, scroll, tapHoldDrag, pinch, twoFingerPan, twoFingerTap, hover] {
             g.delegate = self
             addGestureRecognizer(g)
         }
@@ -345,6 +357,49 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
         virtualCursor = p
         positionCursor()
         onInput?(.tap(at: p, button: .left))
+        // Remember it: touching down again right here starts a drag.
+        tapHoldDrag.noteTap(at: g.location(in: self))
+    }
+
+    /// Like `normalized`, but a point outside the video is pulled to its edge,
+    /// so a drag that runs off the picture keeps tracking along the border.
+    private func normalizedClamped(_ point: CGPoint) -> NormalizedPoint {
+        let rect = videoRect
+        guard rect.width > 0, rect.height > 0 else { return NormalizedPoint(x: 0, y: 0) }
+        return NormalizedPoint(x: min(max((point.x - rect.minX) / rect.width, 0), 1),
+                               y: min(max((point.y - rect.minY) / rect.height, 0), 1))
+    }
+
+    // MARK: Tap, then hold → drag
+
+    @objc private func handleTapHoldDrag(_ g: TapHoldDragRecognizer) {
+        let location = g.location(in: contentView)
+        switch g.state {
+        case .began:
+            // Press where the finger came down, not where it had got to by the
+            // time the drag was recognised, so a selection starts on target.
+            let start = normalizedClamped(contentView.convert(g.startLocation, from: self))
+            virtualCursor = start
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            onInput?(.drag(at: start, phase: .began))
+            lastDragSend = 0
+            fallthrough
+        case .changed:
+            // The host needs no more than a display's worth of positions.
+            let now = CACurrentMediaTime()
+            guard now - lastDragSend >= 1.0 / 60 else { return }
+            lastDragSend = now
+            let p = normalizedClamped(location)
+            virtualCursor = p
+            positionCursor()
+            onInput?(.drag(at: p, phase: .moved))
+        case .ended:
+            onInput?(.drag(at: normalizedClamped(location), phase: .ended))
+        case .cancelled:
+            onInput?(.drag(at: normalizedClamped(location), phase: .cancelled))
+        default:
+            break
+        }
     }
 
     // MARK: Trackpad (flex layout) → virtual cursor
@@ -631,5 +686,89 @@ final class StreamUIView: UIView, UIGestureRecognizerDelegate, UIKeyInput {
         default: nil
         }
         if let code { onInput?(.key(KeyEvent(keyCode: code))) }
+    }
+}
+
+/// One finger: tap, then touch down again nearby and either hold briefly or
+/// start moving. Recognised as a continuous gesture for the second touch.
+///
+/// It fails immediately when a touch is not preceded by a recent tap, so other
+/// recognizers that wait for it (scroll, long press) are not delayed. A quick
+/// second tap that lifts without moving also fails it, leaving the ordinary
+/// double tap (double-click) alone.
+final class TapHoldDragRecognizer: UIGestureRecognizer {
+    /// How soon after the tap the second touch must land, and how close.
+    /// `defaults write <bundle id> tapHoldDragInterval -float 0.6` lengthens
+    /// the window for anyone who finds the default too quick.
+    var maximumInterval: TimeInterval = {
+        let custom = UserDefaults.standard.double(forKey: "tapHoldDragInterval")
+        return custom > 0 ? custom : 0.4
+    }()
+    var maximumDistance: CGFloat = 48
+    /// Holding still this long starts the drag; so does moving `slop` points.
+    var holdDelay: TimeInterval = 0.16
+    var slop: CGFloat = 8
+
+    /// Where the second touch came down, in the recognizer's view.
+    private(set) var startLocation: CGPoint = .zero
+
+    private var lastTap: (time: TimeInterval, point: CGPoint)?
+    private var holdTimer: Timer?
+
+    /// Call when a single tap is delivered, with its location in the view.
+    func noteTap(at point: CGPoint) {
+        lastTap = (ProcessInfo.processInfo.systemUptime, point)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        guard state == .possible, numberOfTouches == 1, let touch = touches.first, let tap = lastTap else {
+            // A second finger, or no tap to follow: not this gesture.
+            state = state == .possible ? .failed : .cancelled
+            return
+        }
+        let point = touch.location(in: view)
+        guard touch.timestamp - tap.time <= maximumInterval,
+              hypot(point.x - tap.point.x, point.y - tap.point.y) <= maximumDistance else {
+            state = .failed
+            return
+        }
+        lastTap = nil   // one tap starts at most one drag
+        startLocation = point
+        holdTimer = Timer.scheduledTimer(withTimeInterval: holdDelay, repeats: false) { [weak self] _ in
+            guard let self, self.state == .possible else { return }
+            self.state = .began
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        guard let touch = touches.first else { return }
+        switch state {
+        case .possible:
+            let point = touch.location(in: view)
+            if hypot(point.x - startLocation.x, point.y - startLocation.y) > slop { state = .began }
+        case .began, .changed:
+            state = .changed
+        default:
+            break
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        // Lifted before holding or moving: that was a double tap, not a drag.
+        state = state == .possible ? .failed : .ended
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        state = state == .possible ? .failed : .cancelled
+    }
+
+    override func reset() {
+        super.reset()
+        holdTimer?.invalidate()
+        holdTimer = nil
     }
 }

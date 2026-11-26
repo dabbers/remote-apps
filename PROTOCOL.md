@@ -138,6 +138,16 @@ treats an unknown input case as a protocol error and drops the connection.
 `WindowGeometry`: window size in host points (`width/height`), encoded pixel size
 (`pixelWidth/Height`), `windowTitle?`. If width/height came back smaller than the
 client asked for, the host clamped the resize and the client letterboxes.
+
+**The video can be larger than the window.** While a popup, menu, sheet or
+dialog of the app reaches past the window's edge, the server streams the area
+that contains the window and everything attached to it, and sends a new
+`windowGeometry` and `videoConfig` with the larger pixel size; when it closes,
+the stream returns to the window. `width/height` stay the size of the window
+itself, so a client that sizes its own window from them does not jump. A client
+must therefore lay out the picture from the video's pixel size (aspect-fit),
+not assume it matches `width/height`, and keep sending input normalized to the
+video (§8): the server maps it over the same area it is streaming.
 `VideoConfig`: `codec` (`"h264"` | `"hevc"`), `parameterSets` (base64 NAL units:
 SPS, PPS[, VPS]), pixel size, `nalLengthSize` (AVCC length prefix size, 4).
 
