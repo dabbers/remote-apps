@@ -208,6 +208,13 @@ open for minutes:
 its saved token and re-send `selectApp` (or `launchApp`) for the app it was
 showing; the server starts a fresh stream with a new `videoConfig` and keyframe.
 
+A client must **not** redial after the server sends
+`{"error":{"message":"taken over by another device"}}`: the close that follows
+means a different device authenticated and took the host (§13). Reconnecting
+would evict that device in turn, and the two would keep closing each other.
+A client should also bound its attempts when a session is closed again within
+a few seconds of connecting.
+
 ## 6. Connection lifecycle
 
 1. Open TCP, complete TLS (ALPN `remoteapp/1`, accept any cert).

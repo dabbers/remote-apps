@@ -113,6 +113,11 @@ final class ClientModel: ObservableObject {
     private var connectTimeout: DispatchWorkItem?
     /// The connection was dropped while in the background; redial on return.
     private var resumeOnForeground = false
+    /// The Mac said another device took this session over: do not redial.
+    private var takenOver = false
+    /// When the current session was established, to tell a session that
+    /// worked from one that is dropped again the moment it connects.
+    private var sessionStart = Date.distantPast
     /// Tracked here rather than read from `UIApplication.applicationState`,
     /// which still says "background" while the will-enter-foreground
     /// notification is being delivered.
@@ -321,11 +326,20 @@ final class ClientModel: ObservableObject {
     private func connectionLost(_ reason: String?) {
         keepalive?.invalidate()
         connectTimeout?.cancel()
+        if takenOver {
+            takenOver = false
+            fail("Another device connected to \(serverName.isEmpty ? "the Mac" : serverName) and took over.")
+            return
+        }
         guard resumeTarget != nil, pendingServer != nil else {
             if case .browsing = phase { return }
             fail(reason.map { "Disconnected: \($0)" } ?? "Disconnected")
             return
         }
+        // A session that held for a while earns a fresh set of attempts. One
+        // that keeps dying right after it connects does not, so whatever is
+        // closing it cannot keep this client redialling forever.
+        if Date().timeIntervalSince(sessionStart) > 10 { reconnectAttempt = 0 }
         NSLog("RemoteApp connection lost (%@); reconnecting", reason ?? "closed")
         scheduleReconnect(lastError: reason)
     }
@@ -354,10 +368,12 @@ final class ClientModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    /// Back to a clean slate once a session is up, or abandoned.
-    private func clearReconnectState() {
+    /// Back to a clean slate once a session is up, or abandoned. A session
+    /// that has only just come up keeps its attempt count (`keepAttempts`)
+    /// until it has proved it stays up; see `connectionLost`.
+    private func clearReconnectState(keepAttempts: Bool = false) {
         reconnecting = false
-        reconnectAttempt = 0
+        if !keepAttempts { reconnectAttempt = 0 }
         resumeOnForeground = false
         reconnectWork?.cancel()
         reconnectWork = nil
@@ -415,7 +431,7 @@ final class ClientModel: ObservableObject {
         endBackgroundTask()
         if resumeOnForeground || (reconnecting && connection == nil) {
             resumeOnForeground = false
-            reconnectAttempt = 0
+            reconnectAttempt = 0   // the user came back: a fresh set of attempts
             scheduleReconnect(lastError: nil)
             return
         }
@@ -570,7 +586,9 @@ final class ClientModel: ObservableObject {
             // After a reconnect, go back to the app that was on screen. Its pid
             // is unchanged unless it was relaunched; then match the bundle id.
             let resuming = reconnecting ? resumeTarget : nil
-            clearReconnectState()
+            clearReconnectState(keepAttempts: true)
+            sessionStart = Date()
+            takenOver = false
             startKeepalive()
             if case .app(let pid, let bundleIdentifier)? = resuming {
                 if let app = ack.apps.first(where: { $0.pid == pid && pid != 0 })
@@ -609,7 +627,12 @@ final class ClientModel: ObservableObject {
                 receivedClipboardItems = saveable
             }
         case .error(let message):
-            errorMessage = message
+            if message == sessionTakenOverMessage {
+                // The close that follows is deliberate; `connectionLost` reports it.
+                takenOver = true
+            } else {
+                errorMessage = message
+            }
         case .ping(let n):
             connection?.send(.pong(n))
         default:

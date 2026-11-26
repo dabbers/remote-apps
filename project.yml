@@ -22,6 +22,9 @@ targets:
   RemoteAppServer:
     type: application
     platform: macOS
+    # A shared scheme, so the target is always listed in Xcode and buildable
+    # with `xcodebuild -scheme` (auto-created schemes are per-user and can vanish).
+    scheme: {}
     sources:
       - path: Server/Sources
       - path: Server/Assets.xcassets
@@ -42,6 +45,9 @@ targets:
   RemoteAppClient:
     type: application
     platform: iOS
+    # A shared scheme, so the target is always listed in Xcode and buildable
+    # with `xcodebuild -scheme` (auto-created schemes are per-user and can vanish).
+    scheme: {}
     deploymentTarget: "17.0"
     supportedDestinations: [iOS, macCatalyst]
     sources:

@@ -299,7 +299,9 @@ extension ServerModel: SessionCoordinator {
         updateDisplayPower()
         // A new device takes over the host; sessions from the same device stack.
         for (otherId, other) in sessions where otherId != sessionID && other.isAuthenticated {
-            if let otherDevice = deviceOf[otherId], otherDevice != deviceID { other.close() }
+            // Say why before closing, so that device does not reconnect and
+            // start a tug of war with this one.
+            if let otherDevice = deviceOf[otherId], otherDevice != deviceID { other.reject(sessionTakenOverMessage) }
         }
         // The same device connecting again is often a phone coming back from
         // being suspended: check its earlier sessions and drop any that no

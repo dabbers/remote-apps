@@ -278,8 +278,11 @@ final class ClientSession {
 
     /// Reject this session (e.g. over the per-device cap) and close it.
     func reject(_ message: String) {
-        send(.error(message: message))
-        close()
+        // Close only once the message has gone out: cancelling straight away
+        // drops it, and the client then cannot tell a deliberate close from a
+        // lost connection.
+        connection.send(.error(message: message)) { [weak self] _ in self?.close() }
+        connection.queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.close() }
     }
 
     private func sendAppList(asHelloAck: Bool, issuedToken: String? = nil) async {
