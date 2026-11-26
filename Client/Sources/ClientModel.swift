@@ -113,6 +113,10 @@ final class ClientModel: ObservableObject {
     private var connectTimeout: DispatchWorkItem?
     /// The connection was dropped while in the background; redial on return.
     private var resumeOnForeground = false
+    /// Tracked here rather than read from `UIApplication.applicationState`,
+    /// which still says "background" while the will-enter-foreground
+    /// notification is being delivered.
+    private var inBackground = false
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var lifecycleObservers: [NSObjectProtocol] = []
     /// When the Mac was last heard from (any message, video included).
@@ -331,7 +335,7 @@ final class ClientModel: ObservableObject {
         reconnecting = true
         // iOS gives a backgrounded app no network time worth dialling in:
         // wait for the user to come back.
-        if UIApplication.shared.applicationState == .background {
+        if inBackground {
             resumeOnForeground = true
             return
         }
@@ -380,6 +384,7 @@ final class ClientModel: ObservableObject {
     /// quick switch keeps the session; when that runs out, hang up properly so
     /// the Mac frees the app at once instead of holding a dead session.
     private func didEnterBackground() {
+        inBackground = true
         guard connection != nil, isConnected, backgroundTask == .invalid else { return }
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "dabtop session") { [weak self] in
             MainActor.assumeIsolated { self?.hangUpForBackground() }
@@ -406,6 +411,7 @@ final class ClientModel: ObservableObject {
     }
 
     private func willEnterForeground() {
+        inBackground = false
         endBackgroundTask()
         if resumeOnForeground || (reconnecting && connection == nil) {
             resumeOnForeground = false
