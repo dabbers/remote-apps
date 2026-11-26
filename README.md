@@ -159,6 +159,13 @@ Notes:
   virtual display anyway; if a future macOS changes that, choose **Always**.
 - The host still needs a logged-in desktop session (and FileVault unlocked after
   a restart) for the server to run at all.
+- **The screen must not lock.** A locked screen hides every window from
+  Accessibility and capture, and only typing the password undoes it. Set
+  **System Settings › Lock Screen › Require password after screen saver begins
+  or display is turned off** to **Never**. The server also stops the display
+  sleeping while a client is connected or while it streams from its virtual
+  display, and it wakes the display when a client arrives. A client that
+  selects an app on a locked host gets an error saying so.
 
 ## Running
 
@@ -215,6 +222,20 @@ xcodebuild -project RemoteApp.xcodeproj -scheme RemoteAppServer -configuration D
 ```bash
 xcodebuild -project RemoteApp.xcodeproj -scheme RemoteAppClient -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/DerivedData build CODE_SIGNING_ALLOWED=NO
 ```
+
+## Connections that drop
+
+Phones suspend apps and tunnels drop without telling the other end, so both
+sides check that the peer is still there (PROTOCOL.md §5, Liveness):
+
+- **Server:** pings each client every 5 s and closes a session that has been
+  silent for 20 s, freeing the app it was streaming. When a device connects
+  again, its earlier sessions are pinged and any that do not answer are closed.
+- **iOS client:** when a session drops it shows "Reconnecting…", redials for
+  about 16 s with the saved pairing, and returns to the app that was on screen.
+  Going to the background, it asks iOS for its grace period (about 30 s) so a
+  quick app switch keeps the session, then hangs up cleanly; coming back, it
+  reconnects by itself.
 
 ## Known limitations
 

@@ -16,6 +16,12 @@ public let alpnProtocol = "remoteapp/1"
 /// client can connect by MagicDNS name without discovering the port first.
 public let defaultPort: UInt16 = 53123
 
+/// The `error` message a server sends just before it closes a session because
+/// another device connected and took over the host (PROTOCOL.md §13). A client
+/// that reconnects automatically must not do so after this, or two devices
+/// would keep evicting each other.
+public let sessionTakenOverMessage = "taken over by another device"
+
 // MARK: - Control messages (JSON, kind = .control)
 
 public struct Hello: Codable, Sendable, Equatable {

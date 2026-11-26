@@ -15,17 +15,27 @@ enum WindowControl {
     }
 
     /// The app's main window, falling back to the focused window, then the first window.
+    ///
+    /// Each candidate must really be a window. An app that is not frontmost can
+    /// answer `AXMainWindow` or `AXFocusedWindow` with something else (Calculator
+    /// returns its application element after the display has slept), and that
+    /// has no position or size to read.
     static func mainWindow(pid: pid_t) -> AXUIElement? {
         let app = AXUIElementCreateApplication(pid)
         for attribute in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
-            if let element = copyAttribute(app, attribute) {
-                return (element as! AXUIElement)
+            if let element = copyAttribute(app, attribute), CFGetTypeID(element) == AXUIElementGetTypeID() {
+                let candidate = element as! AXUIElement
+                if isWindow(candidate) { return candidate }
             }
         }
-        if let windows = copyAttribute(app, kAXWindowsAttribute) as? [AXUIElement], let first = windows.first {
-            return first
+        if let windows = copyAttribute(app, kAXWindowsAttribute) as? [AXUIElement] {
+            return windows.first(where: isWindow)
         }
         return nil
+    }
+
+    private static func isWindow(_ element: AXUIElement) -> Bool {
+        (copyAttribute(element, kAXRoleAttribute) as? String) == (kAXWindowRole as String)
     }
 
     /// Brings the app to the front through the Accessibility API. Unlike
@@ -55,6 +65,27 @@ enum WindowControl {
         guard AXValueGetValue(posValue as! AXValue, .cgPoint, &origin),
               AXValueGetValue(sizeValue as! AXValue, .cgSize, &size) else { return nil }
         return CGRect(origin: origin, size: size)
+    }
+
+    /// What the app exposes through Accessibility, for the log when no window
+    /// is found: whether this process is trusted, and the role of each element
+    /// the app lists as a window.
+    static func windowDiagnosis(pid: pid_t) -> String {
+        let app = AXUIElementCreateApplication(pid)
+        var value: AnyObject?
+        let error = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+        let roles = (value as? [AXUIElement])?.map { copyAttribute($0, kAXRoleAttribute) as? String ?? "?" } ?? []
+        return "trusted \(isTrusted), AXWindows AXError \(error.rawValue), roles \(roles)"
+    }
+
+    /// Why a window's frame could not be read, for the log: the element's role
+    /// and the Accessibility error codes for its position and size.
+    static func frameFailure(of window: AXUIElement) -> String {
+        var value: AnyObject?
+        let position = AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &value)
+        let size = AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &value)
+        let role = copyAttribute(window, kAXRoleAttribute) as? String ?? "?"
+        return "role \(role), position AXError \(position.rawValue), size AXError \(size.rawValue)"
     }
 
     static func title(of window: AXUIElement) -> String? {

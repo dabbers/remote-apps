@@ -191,6 +191,30 @@ Send `ping` ~every 5 s while no video is flowing (QUIC drops idle after 30 s).
 A `ping` is answered with `pong` carrying the same value; it may arrive before
 `helloAck`.
 
+**Liveness.** `ping`/`pong` is also how each side notices a dead peer, because a
+suspended phone or a dropped tunnel sends no FIN and the socket alone can look
+open for minutes:
+
+- The server pings an authenticated client every 5 s and closes the session
+  after 20 s without any message from it. A client **must** answer `ping`.
+- A client should treat about 12 s of silence (no message of any kind, while it
+  is pinging every 5 s) as a lost connection and reconnect.
+- When a device authenticates while it still has earlier sessions open, the
+  server pings those and closes any that do not answer within 2 s. A
+  `selectApp` for an app held by such a session of the same device succeeds
+  once that session is closed, instead of failing with `"already streamed"`.
+
+**Reconnecting.** A client that loses an established session should redial with
+its saved token and re-send `selectApp` (or `launchApp`) for the app it was
+showing; the server starts a fresh stream with a new `videoConfig` and keyframe.
+
+A client must **not** redial after the server sends
+`{"error":{"message":"taken over by another device"}}`: the close that follows
+means a different device authenticated and took the host (§13). Reconnecting
+would evict that device in turn, and the two would keep closing each other.
+A client should also bound its attempts when a session is closed again within
+a few seconds of connecting.
+
 ## 6. Connection lifecycle
 
 1. Open TCP, complete TLS (ALPN `remoteapp/1`, accept any cert).

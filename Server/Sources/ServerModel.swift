@@ -61,6 +61,14 @@ final class ServerModel: ObservableObject {
     private var streamingPID: [UUID: pid_t] = [:]
     private let maxSessionsPerDevice = 8
 
+    /// The display stays awake while a client is connected, and for as long as
+    /// the server streams from its own virtual display (a headless host): once
+    /// that display sleeps macOS locks the screen, and then nothing can be
+    /// streamed until someone unlocks it by hand.
+    private func updateDisplayPower() {
+        DisplayPower.keepAwake(!deviceOf.isEmpty || VirtualDisplayManager.shared.displayID != nil)
+    }
+
     func refreshPermissions() {
         screenRecordingGranted = CGPreflightScreenCaptureAccess()
         accessibilityGranted = WindowControl.isTrusted
@@ -78,9 +86,14 @@ final class ServerModel: ObservableObject {
         // Before anything is captured: a headless host needs a display to exist.
         let displays = VirtualDisplayManager.shared
         displays.onLog = { [weak self] line in self?.append(line) }
-        displays.onChange = { [weak self] in self?.virtualDisplayActive = VirtualDisplayManager.shared.displayID != nil }
+        displays.onChange = { [weak self] in
+            self?.virtualDisplayActive = VirtualDisplayManager.shared.displayID != nil
+            self?.updateDisplayPower()
+        }
         displays.startObserving()
         displays.reconcile()
+        updateDisplayPower()
+        if DisplayPower.isScreenLocked { append("⚠︎ the screen is locked; nothing can be streamed until it is unlocked") }
         tailscale = TailscaleInfo.current()
         if let ts = tailscale, !ts.online {
             tailnetWarning = "Tailscale is installed but this Mac is not online on the tailnet."
@@ -197,6 +210,7 @@ final class ServerModel: ObservableObject {
         sessions.removeAll()
         deviceOf.removeAll()
         streamingPID.removeAll()
+        DisplayPower.keepAwake(false)
         boundEndpoints = []
         listenerState = "stopped"
     }
@@ -248,6 +262,8 @@ final class ServerModel: ObservableObject {
                     }
                 }
                 if self.sessions.isEmpty { self.clientState = nil; self.stats = nil }
+                // With nobody left, the display may sleep again (unless headless).
+                self.updateDisplayPower()
             }
         }
         sessions[id] = session
@@ -277,10 +293,36 @@ extension ServerModel: SessionCoordinator {
 
     func sessionDidAuthenticate(_ sessionID: UUID, deviceID: String) {
         deviceOf[sessionID] = deviceID
+        // A sleeping display cannot be captured: wake it, and keep it on while
+        // anyone is connected.
+        DisplayPower.wake()
+        updateDisplayPower()
         // A new device takes over the host; sessions from the same device stack.
         for (otherId, other) in sessions where otherId != sessionID && other.isAuthenticated {
-            if let otherDevice = deviceOf[otherId], otherDevice != deviceID { other.close() }
+            // Say why before closing, so that device does not reconnect and
+            // start a tug of war with this one.
+            if let otherDevice = deviceOf[otherId], otherDevice != deviceID { other.reject(sessionTakenOverMessage) }
         }
+        // The same device connecting again is often a phone coming back from
+        // being suspended: check its earlier sessions and drop any that no
+        // longer answer, so they stop holding an app and a session slot.
+        for (otherId, other) in sessions where otherId != sessionID && other.isAuthenticated && deviceOf[otherId] == deviceID {
+            Task { @MainActor in
+                guard await !other.isResponsive(within: 2) else { return }
+                self.append("session \(otherId.uuidString.prefix(4)) stopped answering; closing it")
+                other.close()
+            }
+        }
+    }
+
+    func reclaim(pid: pid_t, for sessionID: UUID, deviceID: String) async -> Bool {
+        guard let holderID = streamingPID.first(where: { $0.key != sessionID && $0.value == pid })?.key else { return true }
+        guard deviceOf[holderID] == deviceID, let holder = sessions[holderID] else { return false }
+        if await holder.isResponsive(within: 2) { return false }
+        append("session \(holderID.uuidString.prefix(4)) stopped answering; its app goes to the device's new session")
+        streamingPID[holderID] = nil
+        holder.close()
+        return true
     }
 
     func sessionStreaming(_ sessionID: UUID, deviceID: String, pid: pid_t?) {
