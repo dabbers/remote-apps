@@ -240,7 +240,9 @@ final class ClientSession {
                 var a = app; a.streamed = taken.contains(app.pid); return a
             }
             if asHelloAck {
-                let hostScale = Double(NSScreen.main?.backingScaleFactor ?? 2)
+                // Windows are streamed from the virtual display when there is one.
+                let target = await VirtualDisplayManager.shared.ready()
+                let hostScale = Double((target.flatMap(WindowControl.screen(displayID:)) ?? NSScreen.main)?.backingScaleFactor ?? 2)
                 send(.helloAck(HelloAck(serverName: serverName, hostScale: hostScale, apps: apps, issuedToken: issuedToken,
                                         features: ProtocolFeature.all + [ProtocolFeature.multiSession])))
             } else {
@@ -306,8 +308,9 @@ final class ClientSession {
             WindowControl.raise(axWindow)
             window = axWindow
 
-            // Resize to the client's screen; the app may clamp.
-            let origin = WindowControl.mainScreenContentOrigin()
+            // Resize to the client's screen; the app may clamp. With a virtual
+            // display (headless host) the window goes there, else the main screen.
+            let origin = WindowControl.contentOrigin(displayID: await VirtualDisplayManager.shared.ready())
             let requested = CGSize(width: clientScreen.width, height: clientScreen.height)
             guard let frame = WindowControl.setFrame(axWindow, origin: origin, size: requested) else {
                 send(.error(message: "could not read window frame"))
@@ -322,7 +325,7 @@ final class ClientSession {
                 return
             }
             self.display = display
-            scale = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == display.displayID }?.backingScaleFactor ?? 2
+            scale = WindowControl.screen(displayID: display.displayID)?.backingScaleFactor ?? 2
 
             currentPID = pid
             restartAttempts = 0
@@ -413,7 +416,7 @@ final class ClientSession {
     /// The client's screen changed (rotation, etc.): try to resize the host window again.
     private func applyClientSize() async {
         guard let window else { return }
-        let origin = WindowControl.mainScreenContentOrigin()
+        let origin = WindowControl.contentOrigin(displayID: await VirtualDisplayManager.shared.ready())
         WindowControl.setFrame(window, origin: origin, size: CGSize(width: clientScreen.width, height: clientScreen.height))
         await refreshGeometry()
     }
@@ -465,11 +468,15 @@ final class ClientSession {
             window = axWindow
             windowFrame = frame
             injector?.windowFrame = frame
-            let display = self.display
-                ?? snapshot.content.displays.first(where: { $0.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) })
+            // Resolve the display again: the one captured before may be gone
+            // (a monitor unplugged, the virtual display created or removed).
+            _ = await VirtualDisplayManager.shared.ready()
+            let display = snapshot.content.displays.first(where: { $0.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) })
+                ?? snapshot.content.displays.first(where: { $0.displayID == self.display?.displayID })
                 ?? snapshot.content.displays.first
             guard let display else { throw NSError(domain: "RemoteApp", code: 3, userInfo: [NSLocalizedDescriptionKey: "no display"]) }
             self.display = display
+            scale = WindowControl.screen(displayID: display.displayID)?.backingScaleFactor ?? scale
             try startPipeline(app: scApp, display: display, frame: frame)
             sendGeometry()
             isRestarting = false

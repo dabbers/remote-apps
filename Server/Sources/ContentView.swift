@@ -41,6 +41,21 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            GroupBox("Display") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("Virtual display", selection: $model.virtualDisplayMode) {
+                        Text("Off").tag(VirtualDisplayManager.Mode.off)
+                        Text("When no monitor is attached").tag(VirtualDisplayManager.Mode.auto)
+                        Text("Always").tag(VirtualDisplayManager.Mode.always)
+                    }
+                    Text(model.virtualDisplayActive
+                         ? "Streaming from a virtual display; apps are moved onto it."
+                         : "Streaming from the main display.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             GroupBox("Network") {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
