@@ -135,7 +135,7 @@ to stream from. The server can create a software display for itself, set under
 | Mode | Behaviour |
 |---|---|
 | Off | Never creates one. |
-| When no monitor is attached (default) | Creates one at start, or when the last monitor is unplugged, if no other display is online. It stays until the server quits, so a running stream is not pulled off it if a monitor appears. |
+| When no monitor is attached (default) | Creates one at start, or when the last monitor is unplugged, if no real monitor is online. It stays until the server quits, so a running stream is not pulled off it if a monitor appears. |
 | Always | Creates one even with a monitor attached; streamed apps are moved onto it and off the physical screen. |
 
 The display is 2560×1600 points at 2x and exists only while the server runs. To
@@ -154,8 +154,9 @@ Notes:
   (`Server/Sources/CGVirtualDisplayPrivate.h`). That is fine for a
   self-distributed build, rules out the App Store, and may break in a future
   macOS; an HDMI dummy plug is the hardware fallback.
-- If a headless Mac still reports a placeholder display, "When no monitor is
-  attached" sees a display and does nothing: choose **Always**.
+- With no monitor, macOS still reports a 1920×1080 placeholder display. The
+  default mode recognises it (vendor `unkn`, model `virt`) and creates the
+  virtual display anyway; if a future macOS changes that, choose **Always**.
 - The host still needs a logged-in desktop session (and FileVault unlocked after
   a restart) for the server to run at all.
 
