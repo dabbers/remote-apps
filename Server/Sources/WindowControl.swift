@@ -109,6 +109,51 @@ enum WindowControl {
         return frame(of: window)
     }
 
+    /// The area to stream for a window at `frame`: the window itself plus any of
+    /// the app's other on-screen windows attached to it, clipped to `bounds`.
+    ///
+    /// Popovers, extension popups, context menus, sheets and dialogs are
+    /// separate windows that often reach past the main window's edge,
+    /// especially when that window has been made phone-sized. A window counts
+    /// as attached when it touches the area gathered so far, so a chain of
+    /// submenus is followed, while an unrelated second document window
+    /// elsewhere on the display is left out.
+    static func attachedExtent(pid: pid_t, around frame: CGRect, within bounds: CGRect) -> CGRect {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return frame
+        }
+        // A window far larger than the streamed one is a backdrop or overlay,
+        // not a popup; following it would zoom the stream out to nothing.
+        let areaLimit = max(frame.width * frame.height * 6, 250_000)
+        var candidates: [CGRect] = []
+        for info in list {
+            guard (info[kCGWindowOwnerPID as String] as? pid_t) == pid,
+                  (info[kCGWindowLayer as String] as? Int ?? 0) >= 0,
+                  (info[kCGWindowAlpha as String] as? Double ?? 1) > 0.01,
+                  let dict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: dict as CFDictionary),
+                  rect.width > 2, rect.height > 2,
+                  rect.width * rect.height <= areaLimit else { continue }
+            candidates.append(rect)
+        }
+        var extent = frame
+        var grew = true
+        while grew {
+            grew = false
+            let reach = extent.insetBy(dx: -8, dy: -8)
+            for index in candidates.indices.reversed() where candidates[index].intersects(reach) {
+                let union = extent.union(candidates[index])
+                candidates.remove(at: index)
+                if union != extent {
+                    extent = union
+                    grew = true
+                }
+            }
+        }
+        let clipped = extent.intersection(bounds)
+        return clipped.isNull || clipped.isEmpty ? frame : clipped.integral
+    }
+
     static func raise(_ window: AXUIElement) {
         AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     }

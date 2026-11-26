@@ -38,7 +38,7 @@ gitignored `Config/Local.xcconfig` (see [Running](#running)).
 | App list | `SCShareableContent` → running apps with windows; plus all installed apps enumerated for launching | "Running" list, and a + button to open any installed app |
 | Launch | Opens an installed app via `NSWorkspace`, waits for its window, then streams it | Searchable installed-apps picker |
 | Window sizing | Accessibility API moves/resizes the app's main window to the phone's point size, then reports what the app accepted | Letterboxes (`resizeAspect`) when the app clamped; pinch to zoom |
-| Capture | `SCContentFilter(display:including:[app])` cropped with `sourceRect` to the main window: menus, sheets and popovers of that app are included, other apps are not | — |
+| Capture | `SCContentFilter(display:including:[app])` cropped with `sourceRect` to the main window, widened while a popup, menu or dialog of that app reaches past its edge; other apps are not included | — |
 | Encode/decode | `VTCompressionSession`, H.264 High, real-time, no B-frames, 60 fps, 12 Mbit/s | `AVSampleBufferDisplayLayer` (VideoToolbox decode) fed AVCC access units |
 | Input | `CGEvent`s posted through the HID event tap after bringing the app frontmost, so clicks are hit-tested like real ones; a client's pointer hover (`move`) moves the host cursor without activating anything | Tap = click (double-click by timing), one-finger pan = scroll, long press = right click, keyboard = key events, two-finger tap = toggle HUD; a pointer (Mac, iPad trackpad/mouse) hovering over the video moves the host cursor |
 | Menu bar | Read through the Accessibility API (`AXMenuBar` → `AXMenuBarItem` → `AXMenu` → `AXMenuItem`), with titles, enabled/checked state and shortcut hints; items performed with `AXPress` | iPhone/iPad: native menu sheet from the HUD. **Mac: the streamed app's menus appear in the real Mac menu bar**, plus a "Remote" menu to manage the session |
@@ -239,9 +239,12 @@ sides check that the peer is still there (PROTOCOL.md §5, Liveness):
 
 ## Known limitations
 
-- **One client, one app, one window.** Secondary windows of the same app are
-  only visible where they overlap the main window's rectangle (menus, sheets
-  and popovers usually do). Other apps' windows never appear.
+- **One client, one app, one window.** Popups, menus, sheets and dialogs that
+  touch the main window are followed even past its edge: the stream widens to
+  include them (the picture scales down to fit while they are open) and
+  returns to the window when they close. A separate second window of the same
+  app, somewhere else on the display, is not shown. Other apps' windows never
+  appear.
 - **Minimum window sizes.** Most Mac apps cannot shrink to iPhone width, so the
   stream is letterboxed; pinch to zoom. The server reports the real size in
   `windowGeometry`.

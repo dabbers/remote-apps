@@ -68,6 +68,15 @@ final class ClientSession {
     private var display: SCDisplay?
     private var scale: CGFloat = 2
     private var windowFrame: CGRect = .zero
+    /// The area actually captured and mapped to input: the window plus any
+    /// popups, menus or dialogs attached to it (`WindowControl.attachedExtent`).
+    /// Equal to `windowFrame` when nothing reaches past the window.
+    private var captureFrame: CGRect = .zero
+    /// When the attached windows first fitted in a smaller area again. The
+    /// stream shrinks back only after a short wait, so a menu that closes and
+    /// reopens does not rebuild the encoder twice.
+    private var shrinkPendingSince: Date?
+    private var isRefreshingGeometry = false
     private var geometryTimer: DispatchSourceTimer?
     private let pipelineQueue = DispatchQueue(label: "remoteapp.pipeline", qos: .userInteractive)
 
@@ -397,9 +406,11 @@ final class ClientSession {
 
             currentPID = pid
             restartAttempts = 0
-            injector = InputInjector(pid: pid, windowFrame: frame)
+            captureFrame = WindowControl.attachedExtent(pid: pid, around: frame, within: display.frame)
+            shrinkPendingSince = nil
+            injector = InputInjector(pid: pid, windowFrame: captureFrame)
             injector?.onLog = { [weak self] line in self?.onLog?(line) }
-            try startPipeline(app: scApp, display: display, frame: frame)
+            try startPipeline(app: scApp, display: display, frame: captureFrame)
             sendGeometry()
             sendMenu()
             startGeometryTimer()
@@ -492,7 +503,9 @@ final class ClientSession {
     /// Follows the window if the user (or the app) moves or resizes it.
     private func startGeometryTimer() {
         let timer = DispatchSource.makeTimerSource(queue: pipelineQueue)
-        timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
+        // Fast enough that a popup opening past the window edge is picked up
+        // before the user has read it.
+        timer.schedule(deadline: .now() + 0.15, repeating: 0.15)
         timer.setEventHandler { [weak self] in
             Task { await self?.refreshGeometry() }
         }
@@ -535,7 +548,6 @@ final class ClientSession {
             }
             window = axWindow
             windowFrame = frame
-            injector?.windowFrame = frame
             // Resolve the display again: the one captured before may be gone
             // (a monitor unplugged, the virtual display created or removed).
             _ = await VirtualDisplayManager.shared.ready()
@@ -545,7 +557,10 @@ final class ClientSession {
             guard let display else { throw NSError(domain: "RemoteApp", code: 3, userInfo: [NSLocalizedDescriptionKey: "no display"]) }
             self.display = display
             scale = WindowControl.screen(displayID: display.displayID)?.backingScaleFactor ?? scale
-            try startPipeline(app: scApp, display: display, frame: frame)
+            captureFrame = WindowControl.attachedExtent(pid: pid, around: frame, within: display.frame)
+            shrinkPendingSince = nil
+            injector?.windowFrame = captureFrame
+            try startPipeline(app: scApp, display: display, frame: captureFrame)
             sendGeometry()
             isRestarting = false
             restartAttempts = 0
@@ -563,22 +578,44 @@ final class ClientSession {
     }
 
     private func refreshGeometry() async {
-        // Don't fight an in-progress restart.
-        guard !isRestarting else { return }
-        guard let window, let display, let capture, let frame = WindowControl.frame(of: window) else { return }
-        guard frame != windowFrame else { return }
-        let sizeChanged = frame.size != windowFrame.size
+        // Don't fight an in-progress restart, or an earlier pass still rebuilding.
+        guard !isRestarting, !isRefreshingGeometry else { return }
+        guard let window, let display, let capture, let pid = currentPID,
+              let frame = WindowControl.frame(of: window) else { return }
+        isRefreshingGeometry = true
+        defer { isRefreshingGeometry = false }
+
+        let extent = WindowControl.attachedExtent(pid: pid, around: frame, within: display.frame)
+        if frame == windowFrame, extent != captureFrame, captureFrame.contains(extent) {
+            // Only shrinking (a popup closed): wait a moment in case another
+            // opens, which is what happens when moving along a menu bar.
+            let since = shrinkPendingSince ?? Date()
+            shrinkPendingSince = since
+            if Date().timeIntervalSince(since) < 0.4 { return }
+        }
+        shrinkPendingSince = nil
+        guard frame != windowFrame || extent != captureFrame else { return }
+
+        let sizeChanged = extent.size != captureFrame.size
+        let windowResized = frame.size != windowFrame.size
         windowFrame = frame
-        injector?.windowFrame = frame
+        captureFrame = extent
+        injector?.windowFrame = extent
         if sizeChanged {
             // Pixel size changed: the encoder session is fixed-size, so rebuild it.
             await capture.stop()
             encoder?.invalidate()
-            guard let app = try? await ShareableApps.fetch().content.applications.first(where: { $0.processID == injector?.pid }) else { return }
-            try? startPipeline(app: app, display: display, frame: frame)
-            log("window resized to \(Int(frame.width))×\(Int(frame.height))")
+            guard let app = try? await ShareableApps.fetch().content.applications.first(where: { $0.processID == pid }) else { return }
+            try? startPipeline(app: app, display: display, frame: extent)
+            if windowResized {
+                log("window resized to \(Int(frame.width))×\(Int(frame.height))")
+            } else if extent.size == frame.size {
+                log("stream back to the window, \(Int(extent.width))×\(Int(extent.height))")
+            } else {
+                log("stream widened to \(Int(extent.width))×\(Int(extent.height)) to show a popup or dialog")
+            }
         } else {
-            try? await capture.update(rect: localRect(frame, in: display))
+            try? await capture.update(rect: localRect(extent, in: display))
         }
         sendGeometry()
     }
