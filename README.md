@@ -40,7 +40,7 @@ gitignored `Config/Local.xcconfig` (see [Running](#running)).
 | Window sizing | Accessibility API moves/resizes the app's main window to the phone's point size, then reports what the app accepted | Letterboxes (`resizeAspect`) when the app clamped; pinch to zoom |
 | Capture | `SCContentFilter(display:including:[app])` cropped with `sourceRect` to the main window, widened while a popup, menu or dialog of that app reaches past its edge; other apps are not included | — |
 | Encode/decode | `VTCompressionSession`, H.264 High, real-time, no B-frames, 60 fps, 12 Mbit/s | `AVSampleBufferDisplayLayer` (VideoToolbox decode) fed AVCC access units |
-| Input | `CGEvent`s posted through the HID event tap after bringing the app frontmost, so clicks are hit-tested like real ones; a client's pointer hover (`move`) moves the host cursor without activating anything | Tap = click (double-click by timing), one-finger pan = scroll, long press = right click, keyboard = key events, two-finger tap = toggle HUD; a pointer (Mac, iPad trackpad/mouse) hovering over the video moves the host cursor |
+| Input | `CGEvent`s posted through the HID event tap after bringing the app frontmost, so clicks are hit-tested like real ones; a client's pointer hover (`move`) moves the host cursor without activating anything | Tap = click (double-click by timing), one-finger pan = scroll, long press = right click, tap then touch again and hold or move = left-button drag (select text, move sliders and windows), keyboard = key events, two-finger tap = toggle HUD; a pointer (Mac, iPad trackpad/mouse) hovering over the video moves the host cursor |
 | Menu bar | Read through the Accessibility API (`AXMenuBar` → `AXMenuBarItem` → `AXMenu` → `AXMenuItem`), with titles, enabled/checked state and shortcut hints; items performed with `AXPress` | iPhone/iPad: native menu sheet from the HUD. **Mac: the streamed app's menus appear in the real Mac menu bar**, plus a "Remote" menu to manage the session |
 | Keyboard | Virtual key codes and modifier flags posted as `CGEvent`s; a `⌘`/`⌃`+character is posted by its US-layout key code so menu shortcuts (Copy, Paste…) fire | Software keyboard plus an **accessory bar**: Esc, Tab, arrows, and sticky `⌃⌥⇧⌘` modifiers that arm for the next key (`⌘` then `c` = ⌘C) |
 | Clipboard | **Shared both ways** via `NSPasteboard`, in a platform-neutral form: text as UTF-8, images as PNG/JPEG, files written to `~/Downloads/RemoteApp` and put on the pasteboard | HUD → clipboard: pull the Mac's clipboard (text/images paste-ready), or push this device's clipboard, picked **Photos**, or **Files**; received files/photos saved via the share sheet |
@@ -263,8 +263,11 @@ sides check that the peer is still there (PROTOCOL.md §5, Liveness):
   Network.framework races interfaces (IPv4, IPv6, AWDL); stale attempts show
   as "Connection refused" in the server log and are harmless. TLS/TCP is
   available as a fallback in both UIs.
-- **Drag is in the protocol but not bound to a gesture** on the client; one
-  finger pans (scroll). Text selection by dragging is therefore not possible yet.
+- **Dragging needs a tap first.** One finger pans (scroll), so a drag is tap,
+  then touch down again within 0.4 s and hold or move, as on a trackpad. The
+  first tap is a click, which is what places the caret a text selection starts
+  from. `defaults write <client bundle id> tapHoldDragInterval -float 0.6`
+  lengthens the window.
 - **No audio, no clipboard, no multi-display awareness** beyond picking the
   display that contains the window (or the virtual display, see
   [Headless host](#headless-host-no-monitor)).
@@ -483,7 +486,7 @@ to a black picture until some input arrived.
 
 Several apps at once as separate windows (specified in PROTOCOL.md §13: one
 connection per app; servers first), remote access beyond the tailnet (WebRTC),
-HEVC, drag gestures on iOS, certificate pinning and real account auth.
+HEVC, certificate pinning and real account auth.
 
 ## License
 
