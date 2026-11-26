@@ -19,6 +19,14 @@ final class ServerModel: ObservableObject {
     @Published var transport: Transport.Kind = .tcpTLS
     @Published var tailscale: TailscaleInfo?
     @Published var tailnetWarning: String?
+    /// Software display for a host with no monitor (VirtualDisplay.swift).
+    @Published var virtualDisplayMode = VirtualDisplayManager.shared.mode {
+        didSet {
+            guard virtualDisplayMode != oldValue else { return }
+            VirtualDisplayManager.shared.setMode(virtualDisplayMode)
+        }
+    }
+    @Published var virtualDisplayActive = false
 
     let serverName = Host.current().localizedName ?? "Mac"
     let pairingStore = PairingStore()
@@ -67,6 +75,12 @@ final class ServerModel: ObservableObject {
     func start() {
         stop()
         refreshPairedCount()
+        // Before anything is captured: a headless host needs a display to exist.
+        let displays = VirtualDisplayManager.shared
+        displays.onLog = { [weak self] line in self?.append(line) }
+        displays.onChange = { [weak self] in self?.virtualDisplayActive = VirtualDisplayManager.shared.displayID != nil }
+        displays.startObserving()
+        displays.reconcile()
         tailscale = TailscaleInfo.current()
         if let ts = tailscale, !ts.online {
             tailnetWarning = "Tailscale is installed but this Mac is not online on the tailnet."

@@ -37,6 +37,8 @@ targets:
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO
         MACOSX_DEPLOYMENT_TARGET: "14.0"
+        # Declares the private CGVirtualDisplay API (headless hosts).
+        SWIFT_OBJC_BRIDGING_HEADER: Server/Sources/CGVirtualDisplayPrivate.h
   RemoteAppClient:
     type: application
     platform: iOS

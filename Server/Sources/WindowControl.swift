@@ -82,11 +82,22 @@ enum WindowControl {
         AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     }
 
-    /// Top-left corner of the main screen's usable area, in top-left-origin coordinates.
-    static func mainScreenContentOrigin() -> CGPoint {
-        guard let screen = NSScreen.main else { return .zero }
-        let menuBar = screen.frame.maxY - screen.visibleFrame.maxY
-        return CGPoint(x: screen.visibleFrame.minX, y: menuBar)
+    /// The NSScreen showing a given display, if AppKit knows about it yet.
+    static func screen(displayID: CGDirectDisplayID) -> NSScreen? {
+        NSScreen.screens.first {
+            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == displayID
+        }
+    }
+
+    /// Top-left corner of a screen's usable area (below its menu bar), in
+    /// global top-left-origin coordinates. `nil`, or a display AppKit does not
+    /// know, means the main screen.
+    static func contentOrigin(displayID: CGDirectDisplayID? = nil) -> CGPoint {
+        guard let screen = displayID.flatMap(screen(displayID:)) ?? NSScreen.main else { return .zero }
+        // AppKit's y axis points up from the bottom of the primary screen; flip
+        // against the primary's height to get the top-left-origin y.
+        let primaryHeight = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
+        return CGPoint(x: screen.visibleFrame.minX, y: primaryHeight - screen.visibleFrame.maxY)
     }
 
     private static func copyAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {

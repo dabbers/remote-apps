@@ -126,6 +126,39 @@ client does not verify it.
 The client needs Local Network access (prompted on a real iPhone, not enforced in
 the simulator).
 
+## Headless host (no monitor)
+
+Capture is a region of a display, so a Mac with no monitor attached has nothing
+to stream from. The server can create a software display for itself, set under
+**Display › Virtual display** in the server window:
+
+| Mode | Behaviour |
+|---|---|
+| Off | Never creates one. |
+| When no monitor is attached (default) | Creates one at start, or when the last monitor is unplugged, if no other display is online. It stays until the server quits, so a running stream is not pulled off it if a monitor appears. |
+| Always | Creates one even with a monitor attached; streamed apps are moved onto it and off the physical screen. |
+
+The display is 2560×1600 points at 2x and exists only while the server runs. To
+change it, quit the server and set a size in points (bundle id from
+`Config/Base.xcconfig`):
+
+```sh
+defaults write io.github.dabbers.remoteapps.server virtualDisplayWidth -int 3008
+defaults write io.github.dabbers.remoteapps.server virtualDisplayHeight -int 1692
+defaults write io.github.dabbers.remoteapps.server virtualDisplayHiDPI -bool false   # 1x
+```
+
+Notes:
+
+- It uses CoreGraphics' **private** `CGVirtualDisplay` API
+  (`Server/Sources/CGVirtualDisplayPrivate.h`). That is fine for a
+  self-distributed build, rules out the App Store, and may break in a future
+  macOS; an HDMI dummy plug is the hardware fallback.
+- If a headless Mac still reports a placeholder display, "When no monitor is
+  attached" sees a display and does nothing: choose **Always**.
+- The host still needs a logged-in desktop session (and FileVault unlocked after
+  a restart) for the server to run at all.
+
 ## Running
 
 1. Build and run **RemoteAppServer** (scheme `RemoteAppServer`, My Mac). Grant
@@ -208,7 +241,8 @@ xcodebuild -project RemoteApp.xcodeproj -scheme RemoteAppClient -configuration D
 - **Drag is in the protocol but not bound to a gesture** on the client; one
   finger pans (scroll). Text selection by dragging is therefore not possible yet.
 - **No audio, no clipboard, no multi-display awareness** beyond picking the
-  display that contains the window.
+  display that contains the window (or the virtual display, see
+  [Headless host](#headless-host-no-monitor)).
 - Key events use a placeholder virtual key code with a Unicode payload; apps
   that read key codes (games, some shortcuts) will not see the right key.
 - Latency is bounded by dropping frames when more than 4 are in flight; on
