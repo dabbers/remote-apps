@@ -16,7 +16,7 @@ final class VirtualDisplayManager {
     enum Mode: String, CaseIterable {
         /// Never create one.
         case off
-        /// Create one only while no other display is online.
+        /// Create one only while no real monitor is online.
         case auto
         /// Always create one and stream from it, even with a monitor attached.
         case always
@@ -96,12 +96,20 @@ final class VirtualDisplayManager {
         return WindowControl.screen(displayID: id) != nil ? id : nil
     }
 
+    /// Online displays that are neither ours nor macOS's headless placeholder.
+    ///
+    /// With no monitor attached, an Apple silicon Mac still reports one
+    /// 1920×1080 1x display whose vendor and model are the four-character codes
+    /// 'unkn' and 'virt'. It is not a real monitor, so it does not count.
     private func otherOnlineDisplayCount() -> Int {
         var count: UInt32 = 0
         guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return 0 }
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
         guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return 0 }
-        return ids.prefix(Int(count)).filter { $0 != displayID }.count
+        return ids.prefix(Int(count)).filter { id in
+            let placeholder = CGDisplayVendorNumber(id) == 0x756E_6B6E && CGDisplayModelNumber(id) == 0x7669_7274
+            return id != displayID && !placeholder
+        }.count
     }
 
     private func create() {
